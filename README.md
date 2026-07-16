@@ -13,7 +13,6 @@ A chess engine built with pure CNN + MCTS, trained via Stockfish distillation.
 | Policy head | Conv1×1 512→64 → FC 4096→512 → 4672, log_softmax |
 | Value head | Conv1×1 512→64 → FC 4096→512 → 256 → 1, tanh |
 | MCTS | GPU batched, 2000 sims default, 12 workers |
-| Intuition mode | NN-only (no MCTS), legal-mask filtered |
 
 ## Files
 
@@ -38,9 +37,6 @@ Trains on HuggingFace Stockfish data (800K games), default 1800 epochs, batch_si
 ```bash
 # UCI mode (MCTS)
 chessbot_fp.bat
-
-# Intuition mode (NN-only, no MCTS)
-chessbot_intuition.bat
 ```
 
 ## UCI Options

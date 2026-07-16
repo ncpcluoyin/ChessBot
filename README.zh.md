@@ -38,9 +38,6 @@ distill_daemon.bat
 ```bash
 # UCI 模式（MCTS 搜索）
 chessbot_fp.bat
-
-# 直觉模式（纯 NN，不搜索）
-chessbot_intuition.bat
 ```
 
 ## UCI 选项
