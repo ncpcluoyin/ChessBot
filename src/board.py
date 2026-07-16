@@ -1,10 +1,10 @@
 """
 棋盘状态 → 神经网络输入张量，以及 4672 维走法编解码。
 
-输入张量 (17, 8, 8):
+输入张量 (16, 8, 8):
   - 我方棋子 (0-5): P,N,B,R,Q,K, 0/1
   - 对方棋子 (6-11): P,N,B,R,Q,K, 0/1
-  - 全局 (12-16): 我方王翼/后翼易位, 对方王翼/后翼易位, 过路兵目标格
+  - 易位权 (12-15): 我方王翼/后翼, 对方王翼/后翼
   - rank-flip 编码, STM 视角
 
 走法编码 (4672 = 64 × 73):
@@ -65,7 +65,7 @@ PIECE_TYPES = [chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN, 
 
 def board_to_tensor(board: chess.Board) -> torch.Tensor:
     """
-    将棋盘转换为 (19, 8, 8) 浮点张量。
+    将棋盘转换为 (16, 8, 8) 浮点张量。
     从 STM 视角编码 (黑方走棋时 180°旋转棋盘)。
     我方棋子 (0-5), 对方棋子 (6-11), 走棋方由空间布局隐式指示。
     """
@@ -81,21 +81,13 @@ def board_to_tensor(board: chess.Board) -> torch.Tensor:
 
 
 def _global_planes(board: chess.Board, perspective: bool) -> list:
-    """生成 5 个全局平面 (从 STM 视角)。"""
+    """生成 4 个全局平面 (从 STM 视角)。"""
     planes = []
     our_color, their_color = perspective, not perspective
     planes.append(np.full((8, 8), 1.0 if board.has_kingside_castling_rights(our_color) else 0.0, dtype=np.float32))
     planes.append(np.full((8, 8), 1.0 if board.has_queenside_castling_rights(our_color) else 0.0, dtype=np.float32))
     planes.append(np.full((8, 8), 1.0 if board.has_kingside_castling_rights(their_color) else 0.0, dtype=np.float32))
     planes.append(np.full((8, 8), 1.0 if board.has_queenside_castling_rights(their_color) else 0.0, dtype=np.float32))
-    ep_plane = np.zeros((8, 8), dtype=np.float32)
-    if board.ep_square is not None:
-        sq = board.ep_square
-        if perspective == chess.BLACK:
-            sq = chess.square(chess.square_file(sq), 7 - chess.square_rank(sq))
-        r, f = chess.square_rank(sq), chess.square_file(sq)
-        ep_plane[r, f] = 1.0
-    planes.append(ep_plane)
     return planes
 
 
