@@ -88,8 +88,14 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                 # 加载 EMA 参数
                 ema_ckpt = ckpt.get("ema_params")
                 if ema_ckpt is not None and len(ema_ckpt) == len(ema_params):
+                    skipped_ema = 0
                     for dst, src in zip(ema_params, ema_ckpt):
-                        dst.copy_(src)
+                        if dst.shape == src.shape:
+                            dst.copy_(src)
+                        else:
+                            skipped_ema += 1
+                    if skipped_ema:
+                        print(f"  EMA 跳过 {skipped_ema} 个形状不匹配的参数")
                     ema_loaded = True
                     print(f"  EMA 已加载 ({len(ema_ckpt)} 参数)")
             # 如果 CLI --epochs 大于 checkpoint 的 total_epochs, 扩展周期
