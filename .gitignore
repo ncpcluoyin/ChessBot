@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+.venv*/
+*.egg-info/
+dist/
+build/
+
+# 数据: 不上传权重文件
+data/*
+!data/models/
+data/models/*
+
+# IDE
+.vscode/
+.idea/
+
+# 测试脚本
+test_*.py
+test_*.bat
+mem_profile.py
+
+# 系统
+*.log
+.DS_Store
+Thumbs.db
