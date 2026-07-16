@@ -30,10 +30,9 @@ class Config:
     policy_fc_hidden: int = 512   # 策略头 FC 隐藏层维度
     value_fc_hidden: int = 256    # 价值头第二FC隐藏层维度 (第一FC硬编码512)
     value_fc_hidden2: int = 256   # 价值头第二 FC 隐藏层维度
-    num_input_planes: int = 19
+    num_input_planes: int = 17
     num_history_frames: int = 1
     planes_per_frame: int = 8
-    num_global_planes: int = 7
     policy_output_dim: int = 4672
 
     # --- MCTS ---

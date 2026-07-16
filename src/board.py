@@ -1,17 +1,11 @@
 """
 棋盘状态 → 神经网络输入张量，以及 4672 维走法编解码。
 
-输入张量 (15, 8, 8):
-  - 1 帧当前局面 × 8 平面/帧:
-      [0:6]   棋子 (P,N,B,R,Q,K) 己方+1/对方-1
-      [6]     白方走棋 (1=白走, 0=黑走)
-      [7]     黑方走棋 (0=白走, 1=黑走)
-  - 7 全局平面:
-      [0:2]   己方王车易位权 (王翼,后翼)
-      [2:4]   对方王车易位权 (王翼,后翼)
-      [4]     吃过路兵目标格
-      [5]     半回合计数 (归一化到 [0,1])
-      [6]     全回合计数 (归一化到 [0,1])
+输入张量 (17, 8, 8):
+  - 我方棋子 (0-5): P,N,B,R,Q,K, 0/1
+  - 对方棋子 (6-11): P,N,B,R,Q,K, 0/1
+  - 全局 (12-16): 我方王翼/后翼易位, 对方王翼/后翼易位, 过路兵目标格
+  - rank-flip 编码, STM 视角
 
 走法编码 (4672 = 64 × 73):
   - 每格 73 种走法:
@@ -87,7 +81,7 @@ def board_to_tensor(board: chess.Board) -> torch.Tensor:
 
 
 def _global_planes(board: chess.Board, perspective: bool) -> list:
-    """生成 7 个全局平面 (从 STM 视角)。"""
+    """生成 5 个全局平面 (从 STM 视角)。"""
     planes = []
     our_color, their_color = perspective, not perspective
     planes.append(np.full((8, 8), 1.0 if board.has_kingside_castling_rights(our_color) else 0.0, dtype=np.float32))
@@ -102,8 +96,6 @@ def _global_planes(board: chess.Board, perspective: bool) -> list:
         r, f = chess.square_rank(sq), chess.square_file(sq)
         ep_plane[r, f] = 1.0
     planes.append(ep_plane)
-    planes.append(np.full((8, 8), board.halfmove_clock / 100.0, dtype=np.float32))
-    planes.append(np.full((8, 8), board.fullmove_number / 200.0, dtype=np.float32))
     return planes
 
 
