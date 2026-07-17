@@ -224,7 +224,7 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
         if cmd[0] == 'stop':
             break
 
-        _, board_fen, n_sims, c_puct, search_id, first_rid_offset = cmd
+        _, board_fen, n_sims, c_puct, virtual_loss, search_id, first_rid_offset = cmd
 
         board = _chess.Board(board_fen)
         root_key = board._transposition_key()
@@ -310,7 +310,8 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
                 best_score = -1e9
                 for uci, child in current.children.items():
                     eff_n = child.n + child.virtual_n
-                    sc = child.q + c_puct * child.p * log_sqrt / math.sqrt(1 + eff_n)
+                    instant_q = (child.q * child.n - virtual_loss * child.virtual_n) / max(eff_n, 1)
+                    sc = instant_q + c_puct * child.p * log_sqrt / math.sqrt(1 + eff_n)
                     if sc > best_score:
                         best_score = sc
                         best_uci = uci
@@ -369,7 +370,6 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
 
             for node in path:
                 node.virtual_n += 1
-                node.q += (-1.0 - node.q) / max(node.n + node.virtual_n, 1)
 
             # ── Progress: report frequently (by sims or by time) ──
             now = _time.time()
