@@ -2,7 +2,7 @@
 cd /d "%~dp0"
 
 set TARGET=%TARGET_EPOCH%
-if "%TARGET%"=="" set TARGET=1200
+if "%TARGET%"=="" set TARGET=1800
 set MAX_GAMES=%MAX_GAMES%
 if "%MAX_GAMES%"=="" set MAX_GAMES=5000
 set WORKERS=%DISTILL_WORKERS%
