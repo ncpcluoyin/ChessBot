@@ -211,7 +211,6 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
         ('result',  wid, search_id, visits_dict, pv_list, best_q, total_n)
     """
     import chess as _chess
-    import numpy as _np
     import time as _time
     import queue as _queue
     from src.board import board_to_tensor as _b2t, get_legal_moves_mask as _glm, move_to_index as _m2i
@@ -322,7 +321,6 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
                 child_node = current.children[best_uci]
                 path.append(child_node)
                 current = child_node
-                sqrt_n = _np.sqrt(root_n) if root_n > 0 else 1.0
 
             # Handle leaf
             legals_leaf = list(b.legal_moves)
@@ -341,7 +339,6 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
                 for node in path:
                     if node.virtual_n < 50:
                         node.virtual_n += 1
-                        node.q += (-1.0 - node.q) / max(node.n + node.virtual_n, 1)
                 continue
 
             # Speculative expansion
@@ -350,7 +347,6 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
                 for node in path:
                     if node.virtual_n < 50:
                         node.virtual_n += 1
-                        node.q += (-1.0 - node.q) / max(node.n + node.virtual_n, 1)
                 continue
 
             t_leaf = _b2t(b).numpy()
@@ -523,7 +519,7 @@ class BatchGPUEngine(MCTSEngine):
         warm_sid = -1
         for wid in range(self.num_workers):
             self._cmd_qs[wid].put(
-                ('search', chess.STARTING_FEN, 3, self.config.c_puct, warm_sid, wid * 50000))
+                ('search', chess.STARTING_FEN, 3, self.config.c_puct, self.config.virtual_loss, warm_sid, wid * 50000))
 
         # Drain all warmup results from progress_q
         warm_remaining = set(range(self.num_workers))
@@ -606,7 +602,7 @@ class BatchGPUEngine(MCTSEngine):
         for wid in range(self.num_workers):
             n_sims = per_worker + (1 if wid < remainder else 0)
             self._cmd_qs[wid].put(
-                ('search', board_fen, n_sims, self.config.c_puct, sid, offset))
+                ('search', board_fen, n_sims, self.config.c_puct, self.config.virtual_loss, sid, offset))
         import sys as _sys2
         _sys2.stderr.write(f"[DBG] search sid={sid} started, sims={num_simulations}, per_worker={per_worker}\n")
         _sys2.stderr.flush()
