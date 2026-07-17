@@ -126,6 +126,11 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
             p.requires_grad = any(n.startswith(pre) for pre in trainable_prefixes)
         n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f"  恢复训练: 冻结骨干, 只训新头 ({n_trainable:,} 参数)")
+        # 骨干 BN 设为 eval 模式, 防止 running stats 更新
+        for n, m in model.named_modules():
+            if isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
+                if not any(n.startswith(pre) for pre in trainable_prefixes):
+                    m.eval()
 
     total_games = SFDistillDataset(data_dir, max_games=0, game_offset=0).total_games
     # 启用 TensorFloat-32 (RTX 30xx+ Tensor Core), fp32 精度 2x 加速
