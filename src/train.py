@@ -59,7 +59,8 @@ def collate_fn_selfplay(batch):
 def train_distill(config: Config, data_dir: str, epochs: int = 100,
                   model_path: str = None, num_workers: int = 0,
                   resume: bool = False, max_games: int = 0,
-                  game_offset: int = 0, freeze: bool = False):
+                  game_offset: int = 0, freeze: bool = False,
+                  recover: bool = False):
     if model_path is None:
         model_path = os.path.join(config.model_dir, "model_sf.pt")
 
@@ -117,6 +118,14 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                 p.requires_grad = False
         n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
         print(f"  冻结骨干+策略头, 只训值头 ({n_trainable:,} 参数)")
+
+    if recover:
+        trainable_prefixes = ('reduce_conv.', 'policy_fc1.', 'policy_fc2.',
+                              'value_fc1.', 'value_fc_hidden.', 'value_fc2.')
+        for n, p in model.named_parameters():
+            p.requires_grad = any(n.startswith(pre) for pre in trainable_prefixes)
+        n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"  恢复训练: 冻结骨干, 只训新头 ({n_trainable:,} 参数)")
 
     total_games = SFDistillDataset(data_dir, max_games=0, game_offset=0).total_games
     # 启用 TensorFloat-32 (RTX 30xx+ Tensor Core), fp32 精度 2x 加速

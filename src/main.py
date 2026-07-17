@@ -34,6 +34,7 @@ def main():
     dist_parser.add_argument("--max-games", type=int, default=0, help="每 epoch 对局数 (0=全部)")
     dist_parser.add_argument("--game-offset", type=int, default=0, help="起始对局偏移")
     dist_parser.add_argument('--freeze', action='store_true', help='freeze backbone+policy, train value only')
+    dist_parser.add_argument('--recover', action='store_true', help='freeze backbone, train new heads only')
 
     args = parser.parse_args()
     if args.command is None:
@@ -49,7 +50,8 @@ def main():
                       model_path=args.model, num_workers=args.workers,
                       resume=args.resume, max_games=args.max_games,
                       game_offset=args.game_offset,
-                      freeze=getattr(args, 'freeze', False))
+                      freeze=getattr(args, 'freeze', False),
+                      recover=getattr(args, 'recover', False))
 
 
 def _run_uci(config: Config, model_path: str = None, intuition: bool = False):
