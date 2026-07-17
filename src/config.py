@@ -34,6 +34,7 @@ class Config:
     num_history_frames: int = 1
     planes_per_frame: int = 8
     policy_output_dim: int = 4672
+    bn_momentum: float = 0.01
 
     # --- MCTS ---
     mcts_simulations: int = 2000

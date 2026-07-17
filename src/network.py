@@ -77,6 +77,11 @@ class ChessNet(nn.Module):
         nn.init.normal_(self.value_fc2.weight, mean=0, std=0.01)
         nn.init.zeros_(self.value_fc2.bias)
 
+        # 设置 BN momentum
+        for m in self.modules():
+            if isinstance(m, (nn.BatchNorm2d,)):
+                m.momentum = config.bn_momentum
+
     def _init_weights(self):
         for name, m in self.named_modules():
             if isinstance(m, nn.Conv2d):
