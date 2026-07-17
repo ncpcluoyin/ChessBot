@@ -40,7 +40,7 @@ class Config:
     c_puct: float = 2.5
     dirichlet_alpha: float = 0.3
     dirichlet_epsilon: float = 0.25
-    virtual_loss: float = 3.0
+    virtual_loss: float = 0.5
     num_mcts_workers: int = 12  # 默认 12 (平衡速度/内存), 可设 4-24
     temperature_threshold: int = 16
 

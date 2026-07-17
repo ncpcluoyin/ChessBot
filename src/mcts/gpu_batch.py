@@ -130,8 +130,25 @@ class _Node:
 # Helpers
 # ════════════════════════════════════════════════
 
-def _expand_with_policy(node, board, legals, probs, tree):
-    """Expand node with real NN policy."""
+def _get_top_k(priors, moves, depth):
+    """动态 top-k: 覆盖 90% 概率质量, 深度衰减, 保底 3 个."""
+    # 按概率排序
+    idx = np.argsort(priors)[::-1]
+    cum = 0.0
+    base_k = 0
+    for i, j in enumerate(idx):
+        cum += priors[j]
+        base_k = i + 1
+        if cum >= 0.90:
+            break
+    base_k = max(4, min(18, base_k))
+    k = int(base_k / (1 + 0.25 * depth))
+    k = max(3, k)
+    return idx[:k]
+
+
+def _expand_with_policy(node, board, legals, probs, tree, depth=0):
+    """Expand node with real NN policy, top-k pruning."""
     priors = np.zeros(len(legals), dtype=np.float32)
     for i, mv in enumerate(legals):
         try:
@@ -144,18 +161,29 @@ def _expand_with_policy(node, board, legals, probs, tree):
     else:
         priors[:] = 1.0 / len(legals)
 
-    for i, mv in enumerate(legals):
+    top_idx = _get_top_k(priors, legals, depth)
+    # 归一化前 k 个概率
+    top_sum = priors[top_idx].sum()
+    if top_sum > 0:
+        priors[top_idx] /= top_sum
+    else:
+        priors[top_idx] = 1.0 / len(top_idx)
+
+    for idx in top_idx:
+        mv = legals[idx]
         b2 = board.copy()
         b2.push(mv)
         ck = b2._transposition_key()
-        child = _Node(p=float(priors[i]))
+        child = _Node(p=float(priors[idx]))
         if ck not in tree:
             tree[ck] = child
         node.children[mv.uci()] = child
 
 
-def _merge_real_policy(node, board, legals, probs, tree):
-    """Merge real NN policy into node, preserving Q/N from speculative children."""
+def _merge_real_policy(node, board, legals, probs, tree, depth=0):
+    """Merge real NN policy into node, preserving Q/N from speculative children.
+    After merge, prune to top-k to limit tree width.
+    """
     new_children = {}
     for mv in legals:
         uci = mv.uci()
@@ -181,13 +209,24 @@ def _merge_real_policy(node, board, legals, probs, tree):
         for c in new_children.values():
             c.p = u
 
-    node.children = new_children
+    # 按概率排序, 取 top-k
+    sorted_children = sorted(new_children.items(), key=lambda x: x[1].p, reverse=True)
+    priors = np.array([c.p for _, c in sorted_children], dtype=np.float32)
+    top_idx = _get_top_k(priors, [c[0] for c in sorted_children], depth)
+    pruned = {sorted_children[i][0]: sorted_children[i][1] for i in top_idx}
+    # 归一化保留的节点
+    top_sum = sum(c.p for c in pruned.values())
+    if top_sum > 0:
+        for c in pruned.values():
+            c.p /= top_sum
+
+    node.children = pruned
     for mv in legals:
         b2 = board.copy()
         b2.push(mv)
         ck = b2._transposition_key()
         if ck not in tree:
-            tree[ck] = new_children[mv.uci()]
+            tree[ck] = pruned.get(mv.uci())
 
 
 # ════════════════════════════════════════════════
@@ -289,7 +328,7 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
                 if rid in pending:
                     leaf_node, path_nodes, leaf_board, leaf_legals = pending.pop(rid)
                     leaf_node.pending_rid = None
-                    _merge_real_policy(leaf_node, leaf_board, leaf_legals, rprobs, tree)
+                    _merge_real_policy(leaf_node, leaf_board, leaf_legals, rprobs, tree, depth=len(path_nodes)-1)
                     val = rvalue
                     for node in reversed(path_nodes):
                         node.n += 1
