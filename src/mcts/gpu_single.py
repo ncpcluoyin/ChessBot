@@ -171,9 +171,10 @@ class GPUSingleMCTS(MCTSEngine):
                 best_u, best_m = -1e9, None
                 pN = math.sqrt(max(1, sum(c.n + c.vl
                                            for c in node.children.values())))
+                log_scale = math.sqrt(math.log(pN * pN + 1e-8))
                 for uci, ch in node.children.items():
                     nn = ch.n + ch.vl
-                    sc = ch.w / max(1, nn) + c_puct * ch.prior * pN / (1 + nn)
+                    sc = ch.w / max(1, nn) + c_puct * ch.prior * log_scale / math.sqrt(1 + nn)
                     if sc > best_u:
                         best_u, best_m = sc, uci
                 if not best_m:

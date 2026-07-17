@@ -16,6 +16,8 @@ Performance (18.4M model, RTX 5070):
 """
 
 import os
+import sys
+import math
 import time
 import queue
 import multiprocessing as mp
@@ -302,14 +304,14 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
             path = [root]
             current = root
             root_n = root.n + root.virtual_n
-            sqrt_n = _np.sqrt(root_n) if root_n > 0 else 1.0
+            log_sqrt = math.sqrt(math.log(root_n + 1e-8)) if root_n > 0 else 1.0
 
             while current.children:
                 best_uci = None
                 best_score = -1e9
                 for uci, child in current.children.items():
                     eff_n = child.n + child.virtual_n
-                    sc = child.q + c_puct * child.p * sqrt_n / (1 + eff_n)
+                    sc = child.q + c_puct * child.p * log_sqrt / math.sqrt(1 + eff_n)
                     if sc > best_score:
                         best_score = sc
                         best_uci = uci
