@@ -60,7 +60,7 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                   model_path: str = None, num_workers: int = 0,
                   resume: bool = False, max_games: int = 0,
                   game_offset: int = 0, freeze: bool = False,
-                  recover: bool = False):
+                  recover: bool = False, dual_lr: bool = False):
     if model_path is None:
         model_path = os.path.join(config.model_dir, "model_sf.pt")
 
@@ -151,6 +151,10 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
         backbone_params, lr=config.learning_rate, weight_decay=config.weight_decay)
     value_optimizer = torch.optim.AdamW(
         value_params, lr=config.learning_rate, weight_decay=config.weight_decay)
+
+    if dual_lr:
+        print(f"  双 LR: 骨干=0.1x ({config.learning_rate*0.1:.6f})  值头=1.0x ({config.learning_rate:.4f})")
+
     # 余弦衰减 (手动计算每个 epoch 的 LR)
     _lr_min = config.learning_rate * 0.01
     _lr_range = config.learning_rate - _lr_min
@@ -193,11 +197,19 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
             epoch = epoch_idx
 
             # ── 手动余弦 LR ──
-            _cos_lr = _lr_min + 0.5 * _lr_range * (1 + math.cos(math.pi * epoch / total_epochs))
-            for g in optimizer.param_groups:
-                g['lr'] = _cos_lr
-            for g in value_optimizer.param_groups:
-                g['lr'] = _cos_lr
+            cos_val = 0.5 * (1 + math.cos(math.pi * epoch / total_epochs))
+            _cos_lr = _lr_min + _lr_range * cos_val
+            if dual_lr:
+                backbone_lr = (_lr_min * 0.1) + (_lr_range * 0.1) * cos_val
+                for g in optimizer.param_groups:
+                    g['lr'] = backbone_lr
+                for g in value_optimizer.param_groups:
+                    g['lr'] = _cos_lr
+            else:
+                for g in optimizer.param_groups:
+                    g['lr'] = _cos_lr
+                for g in value_optimizer.param_groups:
+                    g['lr'] = _cos_lr
 
             for p in model.parameters():
                 p.requires_grad = True

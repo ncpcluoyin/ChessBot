@@ -55,13 +55,8 @@ class ChessNet(nn.Module):
             nn.BatchNorm2d(hc),
             nn.GELU(),
         )
-        self.reduce_conv = nn.Sequential(
-            nn.Conv2d(hc, 16, kernel_size=1, bias=False),
-            nn.BatchNorm2d(16),
-            nn.GELU(),
-        )
-        self.policy_fc1 = nn.Linear(16 * 8 * 8, 512)
-        self.policy_fc2 = nn.Linear(512, config.policy_output_dim)
+        self.policy_fc1 = nn.Linear(hc * 8 * 8, fc_h)
+        self.policy_fc2 = nn.Linear(fc_h, config.policy_output_dim)
 
         # ── 价值头 ──
         self.value_conv = nn.Sequential(
@@ -69,8 +64,12 @@ class ChessNet(nn.Module):
             nn.BatchNorm2d(hc),
             nn.GELU(),
         )
-        # 共用 reduce_conv
-        self.value_fc1 = nn.Linear(16 * 8 * 8, 256)
+        self.value_reduce = nn.Sequential(
+            nn.Conv2d(hc, 8, kernel_size=1, bias=False),
+            nn.BatchNorm2d(8),
+            nn.GELU(),
+        )
+        self.value_fc1 = nn.Linear(8 * 8 * 8, 256)
         self.value_fc_hidden = nn.Linear(256, 256)
         self.value_fc2 = nn.Linear(256, 1)
 
@@ -97,9 +96,8 @@ class ChessNet(nn.Module):
         for block in self.res_blocks:
             x = block(x)
 
-        # 共享降维: 512→64→16
+        # 策略头
         p = self.policy_conv(x)
-        p = self.reduce_conv(p)
         p = p.reshape(p.size(0), -1)
         p = F.gelu(self.policy_fc1(p))
         policy_logits = self.policy_fc2(p)
@@ -109,9 +107,9 @@ class ChessNet(nn.Module):
 
         policy_log_probs = F.log_softmax(policy_logits, dim=-1)
 
-        # 价值头 (共用 reduce_conv)
+        # 价值头
         v = self.value_conv(x)
-        v = self.reduce_conv(v)
+        v = self.value_reduce(v)
         v = v.reshape(v.size(0), -1)
         v = F.gelu(self.value_fc1(v))
         v = F.gelu(self.value_fc_hidden(v))
