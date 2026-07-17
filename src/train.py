@@ -104,14 +104,6 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                 total_epochs = epochs
                 sched_state = None
                 print(f"  调度器重置: T_max={total_epochs}")
-            # 调度器重置时, 按当前 epoch 位置计算初始 LR, 不从头爬
-            if sched_state is None and start_epoch > 0:
-                _init_lr = _lr_min + 0.5 * _lr_range * (1 + math.cos(math.pi * start_epoch / total_epochs))
-                for g in optimizer.param_groups:
-                    g['lr'] = _init_lr
-                for g in value_optimizer.param_groups:
-                    g['lr'] = _init_lr
-                print(f"  初始 LR: {_init_lr:.6f} (epoch {start_epoch}/{total_epochs})")
         mode = "冻结" if freeze else "续训"
         print(f"从 epoch {start_epoch} {mode}训练")
     else:
@@ -177,6 +169,15 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
     if sched_state:
         # 忽略旧调度器状态, 手动余弦衰减
         pass
+
+    # 调度器重置时, 按当前 epoch 位置计算初始 LR, 不从头爬
+    if sched_state is None and start_epoch > 0:
+        _init_lr = _lr_min + 0.5 * _lr_range * (1 + math.cos(math.pi * start_epoch / total_epochs))
+        for g in optimizer.param_groups:
+            g['lr'] = _init_lr
+        for g in value_optimizer.param_groups:
+            g['lr'] = _init_lr
+        print(f"  初始 LR: {_init_lr:.6f} (epoch {start_epoch}/{total_epochs})")
 
     _interrupted = False
     def _on_sigint(sig, frame):
