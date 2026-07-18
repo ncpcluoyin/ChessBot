@@ -2,10 +2,8 @@
 cd /d "%~dp0"
 
 set MODEL=data\models\model_sf.pt
-set SIMS=%SP_SIMS%
-if "%SIMS%"=="" set SIMS=800
-set WORKERS=%SP_WORKERS%
-if "%WORKERS%"=="" set WORKERS=12
+set SIMS=800
+set WORKERS=24
 set OUTPUT=data\self_play_games
 
 echo ============================================================

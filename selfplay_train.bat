@@ -3,10 +3,8 @@ cd /d "%~dp0"
 
 set MODEL=data\models\model_sf.pt
 set DATA=data\self_play_games
-set EPOCHS=%SP_EPOCHS%
-if "%EPOCHS%"=="" set EPOCHS=5
-set LR=%SP_LR%
-if "%LR%"=="" set LR=0.001
+set EPOCHS=5
+set LR=0.001
 
 echo ============================================================
 echo   Self-Play Training
@@ -23,5 +21,5 @@ echo ============================================================
     --lr %LR%
 
 echo.
-echo [Training finished]
+echo [Done]
 pause
