@@ -18,7 +18,8 @@ echo ============================================================
     --model "%MODEL%" ^
     --data "%DATA%" ^
     --epochs %EPOCHS% ^
-    --lr %LR%
+    --lr %LR% ^
+    --cleanup
 
 echo.
 echo [Done]

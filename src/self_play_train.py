@@ -15,11 +15,11 @@ from src.board import board_to_tensor
 torch.set_float32_matmul_precision('high')
 
 
-def train_selfplay(model, game_dir, config, epochs=5, batch_size=1024, lr=0.001):
-    """Load self-play games from game_dir and train."""
-    files = sorted(glob.glob(os.path.join(game_dir, 'game_*.pt')))
+def train_selfplay(model, game_dir, config, epochs=5, batch_size=1024, lr=0.001, cleanup=False):
+    """Load self-play games from game_dir and train. If cleanup, delete .pt/.pgn after training."""
+    files = sorted(glob.glob(os.path.join(game_dir, '*.pt')))
     if not files:
-        print(f"No game files found in {game_dir}")
+        print(f"No .pt files found in {game_dir}")
         return 0.0
 
     # Load all samples into memory
@@ -63,10 +63,20 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=1024, lr=0.001)
             n_batches += 1
 
         avg = total_loss / max(n_batches, 1)
-        pol_avg = float(-(td * pol).sum(dim=-1).mean())  # last batch
+        pol_avg = float(-(td * pol).sum(dim=-1).mean())
         val_avg = float(((v_pred - v_label) ** 2).mean())
         print(f"  epoch {epoch+1}/{epochs}: loss={avg:.4f}  policy={pol_avg:.4f}  value={val_avg:.4f}",
               flush=True)
+
+    # Cleanup: delete .pt and .pgn files after training
+    if cleanup and files:
+        n_pt = len(glob.glob(os.path.join(game_dir, '*.pt')))
+        n_pgn = len(glob.glob(os.path.join(game_dir, '*.pgn')))
+        for f in glob.glob(os.path.join(game_dir, '*.pt')):
+            os.remove(f)
+        for f in glob.glob(os.path.join(game_dir, '*.pgn')):
+            os.remove(f)
+        print(f"Cleaned {n_pt} .pt + {n_pgn} .pgn files")
 
     return total_loss / max(n_batches, 1)
 
@@ -74,15 +84,16 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=1024, lr=0.001)
 if __name__ == '__main__':
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument("--model", required=True, help="Model to train (read+write)")
-    p.add_argument("--data", default="data/self_play_games", help="Self-play game dir")
+    p.add_argument("--model", required=True)
+    p.add_argument("--data", default="data/self_play_games")
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--lr", type=float, default=0.001)
+    p.add_argument("--cleanup", action="store_true", help="Delete old .pt/.pgn after training")
     args = p.parse_args()
 
     config = Config()
     config.device = 'cuda'
     model = load_model(args.model, config).cuda()
-    train_selfplay(model, args.data, config, epochs=args.epochs, lr=args.lr)
+    train_selfplay(model, args.data, config, epochs=args.epochs, lr=args.lr, cleanup=args.cleanup)
     save_model(model, args.model)
     print(f"Model saved to {args.model}")
