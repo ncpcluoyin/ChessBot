@@ -57,7 +57,6 @@ def _gpu_inference_loop(req_q, res_qs, model_path, config_dict, max_batch, colle
     model = model.cuda().eval()
     amp_dtype = next(model.parameters()).dtype
     device = 'cuda'
-    value_noise_std = config_dict.get('value_noise_std', 0.0)
 
     collect_sec = collect_ms / 1000.0
     running = True
@@ -100,12 +99,7 @@ def _gpu_inference_loop(req_q, res_qs, model_path, config_dict, max_batch, colle
 
         for i, (rid, wid) in enumerate(zip(ids, wids)):
             if wid < len(res_qs) and res_qs[wid] is not None:
-                v = float(vals[i][0])
-                if value_noise_std > 0:
-                    import random as _rnd
-                    v += _rnd.gauss(0, value_noise_std)
-                    v = max(-1.0, min(1.0, v))
-                res_qs[wid].put((rid, probs[i], v))
+                res_qs[wid].put((rid, probs[i], float(vals[i][0])))
 
     for q in res_qs:
         if q is not None:
@@ -357,7 +351,7 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
                 for uci, child in current.children.items():
                     eff_n = child.n + child.virtual_n
                     instant_q = (child.q * child.n - virtual_loss * child.virtual_n) / max(eff_n, 1)
-                    sc = instant_q + c_puct * math.sqrt(child.p) * log_sqrt / math.sqrt(1 + eff_n)
+                    sc = instant_q + c_puct * log_sqrt / math.sqrt(1 + eff_n)
                     if sc > best_score:
                         best_score = sc
                         best_uci = uci
@@ -485,7 +479,6 @@ class BatchGPUEngine(MCTSEngine):
     def __init__(self, model, config: Config):
         self.model = model
         self.config = config
-        self.value_noise_std = getattr(config, 'value_noise_std', 0.0)
         # 推理优化
         torch.set_float32_matmul_precision('high')
         torch.backends.cudnn.allow_tf32 = True
