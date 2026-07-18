@@ -233,20 +233,28 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                         label_idx = int(sf_labels[i])
 
                         if match[i]:
-                            # 正确: 平滑 top-10
+                            # 正确: 算锐度, 高才平滑
                             idx = np.argsort(probs)[::-1][:k]
                             top_p = np.maximum(probs[idx], 1e-10)
                             if label_idx not in idx:
                                 idx = np.append(idx[:k-1], label_idx)
                                 top_p = np.maximum(probs[idx], 1e-10)
-                            # 仅易位加权
-                            uci = move_index_to_uci(label_idx)
-                            if uci in ('e1g1', 'e8g8', 'e1c1', 'e8c8'):
-                                pos = np.where(idx == label_idx)[0]
-                                if len(pos) > 0:
-                                    top_p[pos[0]] *= 2.0
-                            q = top_p ** alpha
-                            q /= q.sum()
+
+                            # 锐度 = top-1 概率 (越高越尖锐)
+                            sharpness = top_p[0]
+                            if sharpness > 0.5:
+                                # 高锐度: 平滑
+                                # 仅易位加权
+                                uci = move_index_to_uci(label_idx)
+                                if uci in ('e1g1', 'e8g8', 'e1c1', 'e8c8'):
+                                    pos = np.where(idx == label_idx)[0]
+                                    if len(pos) > 0:
+                                        top_p[pos[0]] *= 2.0
+                                q = top_p ** alpha
+                                q /= q.sum()
+                            else:
+                                # 已经够平滑, 保持原分布 (归一化即可)
+                                q = top_p / top_p.sum()
                             out = np.zeros(4672, dtype=np.float32)
                             out[idx] = q
                         else:
