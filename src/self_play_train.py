@@ -59,7 +59,7 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=1024, lr=0.001,
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
-            total_loss += float(loss)
+            total_loss += loss.item()
             n_batches += 1
 
         avg = total_loss / max(n_batches, 1)
