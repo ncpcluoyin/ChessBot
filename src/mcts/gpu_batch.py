@@ -343,7 +343,7 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
             path = [root]
             current = root
             root_n = root.n + root.virtual_n
-            log_sqrt = math.sqrt(max(root_n, 1))  # AlphaZero: sqrt(N_parent)
+            log_sqrt = math.sqrt(math.log(root_n + 2.0))  # AlphaZero 风格: sqrt(log(N+1)), N=0 时 = sqrt(log(2)) ≈ 0.83
 
             while current.children:
                 best_uci = None
