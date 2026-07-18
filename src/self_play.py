@@ -1,30 +1,16 @@
 """
-Self-play: generate games + train on them, alternating.
-
-Each cycle:
-  1. Generate N games via MCTS + current model
-  2. Train on self-play data (policy + value)
-  3. Update model, repeat
-
-Usage:
-  python -m src.self_play --model data/models/model_sf.pt --games 200 --sims 800 --train-epochs 5
+Self-play game generation. Saves games to disk, one .pt per game.
 """
 
 import gc, os, signal, sys, time, hashlib, json, glob
 import numpy as np
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 import chess
 
 from src.board import board_to_tensor, move_to_index
 from src.config import Config
-from src.network import load_model, create_model, save_model
+from src.network import load_model
 from src.mcts import get_mcts_engine
-
-torch.set_float32_matmul_precision('high')
-
-# ── Constants ────────────────────────────────────────────────────────
 
 TEMP_THRESHOLD = 30
 TEMPERATURE = 1.0
@@ -34,36 +20,33 @@ DIR_EPSILON = 0.25
 MIN_MOVES = 20
 MAX_MOVES = 200
 
-# ── Generate games ──────────────────────────────────────────────────
 
 def play_one_game(mcts, config, stop_event=None):
     board = chess.Board()
-    positions = []
+    samples = []
     move_count = 0
 
     while not board.is_game_over() and move_count < MAX_MOVES:
         if stop_event and stop_event.is_set():
             break
-
         use_dd = move_count < TEMP_THRESHOLD
         result = mcts.search(board, num_simulations=config.self_play_simulations,
                               use_dirichlet=use_dd, stop_event=stop_event)
         if result is None or result.policy is None:
             break
-
         tensor = board_to_tensor(board)
-        positions.append((tensor, result.policy.copy(), None))
-
+        samples.append({
+            'tensor': tensor,
+            'policy': torch.from_numpy(result.policy.copy()).float(),
+        })
         if move_count < TEMP_THRESHOLD:
             move = _sample_move(result.policy, board)
         else:
             move = _greedy_move(result.policy, board)
-
         if move is None:
             break
         board.push(move)
         move_count += 1
-
         if abs(result.root_value) > 5.0 and move_count > MIN_MOVES:
             break
 
@@ -79,15 +62,13 @@ def play_one_game(mcts, config, stop_event=None):
     else:
         white_result = 0.0
 
-    # Build STM-perspective value labels
-    tensors, policies, values = [], [], []
-    for j, (t, p, _) in enumerate(positions):
-        stm_val = white_result if (j % 2 == 0) else -white_result
-        tensors.append(t)
-        policies.append(p)
-        values.append(stm_val)
+    # STM-perspective value labels
+    for j, s in enumerate(samples):
+        s['value'] = white_result if (j % 2 == 0) else -white_result
+        s['result'] = white_result
+        s['fen'] = board.fen()  # approximate, not exact per position
 
-    return tensors, policies, values, white_result, move_count
+    return samples, white_result, move_count
 
 
 def _sample_move(policy, board):
@@ -117,130 +98,71 @@ def _greedy_move(policy, board):
     return legals[indices.index(best)]
 
 
-def _game_hash(positions):
+def _game_hash(samples):
     h = hashlib.md5()
-    for t, _, _ in positions:
-        h.update(t.numpy().tobytes())
+    for s in samples:
+        h.update(s['tensor'].numpy().tobytes())
     return h.hexdigest()[:16]
 
 
-# ── Training on self-play data ──────────────────────────────────────
-
-def train_selfplay(model, games, config, epochs=5, batch_size=1024, lr=0.001):
-    """Train model on self-play games. Returns avg loss."""
-    model.train()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-
-    # Extract all samples
-    samples = []
-    for game in games:
-        tensors = game['positions']
-        policies = game['policies']
-        values = game['values']
-        for j in range(len(tensors)):
-            samples.append((tensors[j], policies[j], float(values[j])))
-
-    if len(samples) < batch_size:
-        return 0.0
-
-    indices = list(range(len(samples)))
-    total_loss = 0.0
-    n_batches = 0
-
-    for _ in range(epochs):
-        np.random.shuffle(indices)
-        for start in range(0, len(indices), batch_size):
-            sel = [samples[i] for i in indices[start:start+batch_size]]
-            inputs = torch.stack([s[0] for s in sel]).to(config.device)
-            td = torch.tensor(np.array([s[1] for s in sel]), dtype=torch.float32).to(config.device)
-            v_label = torch.tensor([s[2] for s in sel], dtype=torch.float32).to(config.device)
-
-            optimizer.zero_grad()
-            pol, v_pred = model(inputs)
-            v_pred = v_pred.squeeze(-1)
-            pol_loss = -(td * pol).sum(dim=-1).mean()
-            val_loss = ((v_pred - v_label) ** 2).mean()
-            loss = pol_loss + 12.0 * val_loss
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-            optimizer.step()
-            total_loss += float(loss)
-            n_batches += 1
-
-    return total_loss / max(n_batches, 1)
-
-
-# ── Main loop ───────────────────────────────────────────────────────
-
-def generate_and_train(mcts, model, config, num_games, train_epochs,
-                        output_dir, stop_event=None, verbose=True):
-    """Generate games, train on them, return stats."""
+def generate_games(mcts, config, num_games, output_dir, stop_event=None, verbose=True):
     os.makedirs(output_dir, exist_ok=True)
-    seen_hashes = set()
+    existing = [f for f in os.listdir(output_dir) if f.startswith('game_') and f.endswith('.pt')]
+    start_idx = 0
+    if existing:
+        nums = [int(f.replace('game_','').replace('.pt','')) for f in existing]
+        start_idx = max(nums) + 1
 
-    # Generate
+    seen_hashes = set()
+    stats = {'wins': 0, 'losses': 0, 'draws': 0, 'total_positions': 0}
     t0 = time.time()
-    games = []
-    stats = {'wins': 0, 'losses': 0, 'draws': 0}
+
     for i in range(num_games):
         if stop_event and stop_event.is_set():
             break
         gc.collect()
-        tensors, policies, values, result, length = play_one_game(mcts, config, stop_event)
-        if len(tensors) < 5:
+        samples, result, length = play_one_game(mcts, config, stop_event)
+        if len(samples) < 5:
             continue
-        gh = _game_hash(list(zip(tensors, policies, [None]*len(tensors))))
+        gh = _game_hash(samples)
         if gh in seen_hashes:
             continue
         seen_hashes.add(gh)
 
-        games.append({
-            'positions': tensors, 'policies': policies,
-            'values': torch.tensor(values, dtype=torch.float32),
-            'result': result, 'length': length,
-        })
+        path = os.path.join(output_dir, f'game_{start_idx + i:04d}.pt')
+        torch.save({
+            'samples': samples,
+            'result': result,
+            'length': length,
+            'hash': gh,
+        }, path)
+
+        stats['total_positions'] += len(samples)
         if result > 0.5: stats['wins'] += 1
         elif result < -0.5: stats['losses'] += 1
         else: stats['draws'] += 1
 
         if verbose:
             elapsed = time.time() - t0
-            print(f"  [{i+1}/{num_games}] {length:3d} moves  "
+            print(f"  [{i+1}/{num_games}] {length:3d} pos  "
                   f"W/B/D {stats['wins']}/{stats['losses']}/{stats['draws']}  "
-                  f"{elapsed:.0f}s", flush=True)
+                  f"({elapsed:.0f}s)", flush=True)
 
-    gen_time = time.time() - t0
-
-    # Train
-    t0 = time.time()
-    avg_loss = train_selfplay(model, games, config, epochs=train_epochs)
-    train_time = time.time() - t0
-
-    total_pos = sum(len(g['positions']) for g in games)
-    print(f"  Trained: {len(games)} games, {total_pos} positions, "
-          f"avg_loss={avg_loss:.4f}, gen={gen_time:.0f}s, train={train_time:.0f}s",
+    elapsed = time.time() - t0
+    total = stats['wins'] + stats['losses'] + stats['draws']
+    print(f"  Generated {total} games, {stats['total_positions']} positions, {elapsed:.0f}s",
           flush=True)
-
-    stats['games'] = len(games)
-    stats['positions'] = total_pos
-    stats['avg_loss'] = avg_loss
-    stats['gen_time'] = gen_time
-    stats['train_time'] = train_time
     return stats
 
 
-# ── CLI ─────────────────────────────────────────────────────────────
-
 if __name__ == '__main__':
     import argparse
-    p = argparse.ArgumentParser(description="Self-play: generate + train")
+    p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
     p.add_argument("--games", type=int, default=200)
     p.add_argument("--sims", type=int, default=800)
-    p.add_argument("--train-epochs", type=int, default=5)
     p.add_argument("--workers", type=int, default=12)
     p.add_argument("--output", default="data/self_play_games")
-    p.add_argument("--lr", type=float, default=0.001)
     args = p.parse_args()
 
     config = Config()
@@ -248,30 +170,20 @@ if __name__ == '__main__':
     config.num_mcts_workers = args.workers
     config.max_game_length = MAX_MOVES
 
-    print(f"Loading model: {args.model}")
-    model = load_model(args.model, config).cuda()
-    model.train()
-    n_params = sum(p.numel() for p in model.parameters())
-    print(f"  Params: {n_params/1e6:.1f}M")
+    model = load_model(args.model, config).cuda().eval()
+    print(f"Model: {sum(p.numel() for p in model.parameters())/1e6:.1f}M")
 
-    print(f"Creating MCTS (workers={config.num_mcts_workers}, sims={args.sims})...")
     engine = get_mcts_engine(model, config)
     engine._ensure_pool()
 
-    stop_evt = None
     def _on_int(sig, frame):
-        print("\n[Interrupted]", flush=True)
+        print("\n[Interrupted]")
         if stop_evt: stop_evt.set()
     import signal as _sig
+    stop_evt = None
     _sig.signal(_sig.SIGINT, _on_int)
 
-    print(f"Generating {args.games} games + training {args.train_epochs} epochs...")
     try:
-        stats = generate_and_train(engine, model, config, args.games,
-                                    args.train_epochs, args.output, stop_evt)
-        # Save model
-        save_model(model, args.model)
-        print(f"Model saved to {args.model}")
+        generate_games(engine, config, args.games, args.output)
     finally:
         engine.shutdown()
-        print("Done.")
