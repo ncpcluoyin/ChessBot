@@ -645,7 +645,6 @@ class BatchGPUEngine(MCTSEngine):
             self._cmd_qs[wid].put(
                 ('search', board_fen, n_sims, self.config.c_puct, self.config.virtual_loss, sid, offset))
         import sys as _sys2
-        _sys2.stderr.write(f"[DBG] search sid={sid} started, sims={num_simulations}, per_worker={per_worker}\n")
         _sys2.stderr.flush()
 
         # Collect results
@@ -707,7 +706,7 @@ class BatchGPUEngine(MCTSEngine):
                 time.sleep(0.01)
                 if not any(p.is_alive() for p in self._workers):
                     import sys as _sys
-                    
+                    _sys.stderr.write(f"[DBG] sid={sid} workers ALL DEAD, "
                                       f"pending={pending_workers}\n")
                     _sys.stderr.flush()
                     break
@@ -737,7 +736,8 @@ class BatchGPUEngine(MCTSEngine):
                     break
 
         if not merged:
-            
+            import sys as _sys
+            _sys.stderr.write(f"[DBG] sid={sid} no merged results, "
                               f"pending={pending_workers} "
                               f"alive={[p.is_alive() for p in self._workers]}\n")
             _sys.stderr.flush()
@@ -766,7 +766,7 @@ class BatchGPUEngine(MCTSEngine):
             best_move = chess.Move.from_uci(best_uci)
             if best_move not in board.legal_moves:
                 import sys as _sys
-                
+                _sys.stderr.write(f"[DBG] bad best_uci={best_uci}, "
                                   f"merged keys={list(merged.keys())[:10]}\n")
                 _sys.stderr.flush()
                 raise ValueError("not legal")
