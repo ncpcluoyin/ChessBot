@@ -36,7 +36,7 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001,
     files = sorted(glob.glob(os.path.join(game_dir, '*.pt')))
     if not files:
         print(f"No .pt files found in {game_dir}")
-        return 0.0
+        return 0.0, None, None
 
     # Load samples, limit to max_samples
     samples = []
@@ -51,7 +51,7 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001,
 
     if len(samples) < batch_size:
         print(f"Only {len(samples)} samples, need at least {batch_size}")
-        return 0.0
+        return 0.0, None, None
 
     print(f"Loaded {len(samples)} samples from {len(files)} games")
 
@@ -128,6 +128,9 @@ if __name__ == '__main__':
     loss, ema_params, trainable_params = train_selfplay(
         model, args.data, config, epochs=args.epochs, lr=args.lr,
         cleanup=args.cleanup, max_samples=args.max_samples)
+    if ema_params is None:
+        print("No data, skipping model save")
+        sys.exit(0)
     save_model(model, args.model)
     print(f"Model saved to {args.model}")
 
