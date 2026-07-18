@@ -8,6 +8,7 @@ from datetime import datetime
 import numpy as np
 import torch
 import chess
+import chess.pgn
 
 from src.board import board_to_tensor, move_to_index
 from src.config import Config
@@ -98,6 +99,12 @@ def _sample_move(policy, board):
         return None
     indices = [move_to_index(mv, board) for mv in legals]
     probs = np.array([max(policy[idx], 0.0) for idx in indices], dtype=np.float64)
+
+    # 王车易位偏置: 概率乘 3
+    for i, mv in enumerate(legals):
+        uci = mv.uci()
+        if uci in ('e1g1', 'e1c1', 'e8g8', 'e8c8'):
+            probs[i] *= 3.0
     if TOP_K_SAMPLE > 0 and TOP_K_SAMPLE < len(legals):
         top_idx = np.argpartition(probs, -TOP_K_SAMPLE)[-TOP_K_SAMPLE:]
         mask = np.zeros_like(probs, dtype=bool)
