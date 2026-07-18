@@ -2,7 +2,7 @@
 Train on self-play games (saved by self_play.py).
 """
 
-import os, sys, glob, random
+import os, sys, glob, random, shutil
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -98,15 +98,21 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001,
         print(f"  epoch {epoch+1}/{epochs}: loss={avg:.4f}  policy={pol_avg:.4f}  value={val_avg:.4f}",
               flush=True)
 
-    # Cleanup: delete .pt and .pgn files after training
+    # Cleanup: delete .pt, move .pgn to D:\pgn_baks
     if cleanup and files:
-        n_pt = len(glob.glob(os.path.join(game_dir, '*.pt')))
-        n_pgn = len(glob.glob(os.path.join(game_dir, '*.pgn')))
+        n_pt = 0
         for f in glob.glob(os.path.join(game_dir, '*.pt')):
             os.remove(f)
+            n_pt += 1
+
+        bak_dir = 'D:\\pgn_baks'
+        os.makedirs(bak_dir, exist_ok=True)
+        n_pgn = 0
         for f in glob.glob(os.path.join(game_dir, '*.pgn')):
-            os.remove(f)
-        print(f"Cleaned {n_pt} .pt + {n_pgn} .pgn files")
+            shutil.move(f, os.path.join(bak_dir, os.path.basename(f)))
+            n_pgn += 1
+
+        print(f"Deleted {n_pt} .pt, moved {n_pgn} .pgn → {bak_dir}")
 
     return total_loss / max(n_batches, 1), ema_params, trainable_params
 
