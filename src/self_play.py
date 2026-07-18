@@ -100,13 +100,13 @@ def _sample_move(policy, board):
     indices = [move_to_index(mv, board) for mv in legals]
     probs = np.array([max(policy[idx], 0.0) for idx in indices], dtype=np.float64)
 
-    # 王车易位偏置: 短易位 +0.05, 长易位 +0.025 (加法, 不受 NN 概率影响)
+    # 王车易位偏置: 仅在合法时加概率
     for i, mv in enumerate(legals):
         uci = mv.uci()
         if uci in ('e1g1', 'e8g8'):
-            probs[i] += 0.05
+            probs[i] += 0.10
         elif uci in ('e1c1', 'e8c8'):
-            probs[i] += 0.025
+            probs[i] += 0.08
     if TOP_K_SAMPLE > 0 and TOP_K_SAMPLE < len(legals):
         top_idx = np.argpartition(probs, -TOP_K_SAMPLE)[-TOP_K_SAMPLE:]
         mask = np.zeros_like(probs, dtype=bool)
