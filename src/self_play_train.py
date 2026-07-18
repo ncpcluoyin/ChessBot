@@ -67,8 +67,8 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001, 
             n_batches += 1
 
         avg = total_loss / max(n_batches, 1)
-        pol_avg = float(-(td * pol).sum(dim=-1).mean())
-        val_avg = float(((v_pred - v_label) ** 2).mean())
+        pol_avg = float(-(td * pol).sum(dim=-1).detach().mean())
+        val_avg = float(((v_pred - v_label) ** 2).detach().mean())
         print(f"  epoch {epoch+1}/{epochs}: loss={avg:.4f}  policy={pol_avg:.4f}  value={val_avg:.4f}",
               flush=True)
 
