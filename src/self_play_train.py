@@ -15,18 +15,22 @@ from src.board import board_to_tensor
 torch.set_float32_matmul_precision('high')
 
 
-def train_selfplay(model, game_dir, config, epochs=5, batch_size=1024, lr=0.001, cleanup=False):
+def train_selfplay(model, game_dir, config, epochs=5, batch_size=1024, lr=0.001, cleanup=False, max_samples=0):
     """Load self-play games from game_dir and train. If cleanup, delete .pt/.pgn after training."""
     files = sorted(glob.glob(os.path.join(game_dir, '*.pt')))
     if not files:
         print(f"No .pt files found in {game_dir}")
         return 0.0
 
-    # Load all samples into memory
+    # Load samples, limit to max_samples
     samples = []
     for fp in files:
+        if max_samples > 0 and len(samples) >= max_samples:
+            break
         data = torch.load(fp, map_location='cpu', weights_only=False)
         for s in data['samples']:
+            if max_samples > 0 and len(samples) >= max_samples:
+                break
             samples.append((s['tensor'], s['policy'], s['value']))
 
     if len(samples) < batch_size:
@@ -88,12 +92,14 @@ if __name__ == '__main__':
     p.add_argument("--data", default="data/self_play_games")
     p.add_argument("--epochs", type=int, default=5)
     p.add_argument("--lr", type=float, default=0.001)
+    p.add_argument("--max-samples", type=int, default=50000, help="Max samples to load (0=unlimited)")
     p.add_argument("--cleanup", action="store_true", help="Delete old .pt/.pgn after training")
     args = p.parse_args()
 
     config = Config()
     config.device = 'cuda'
     model = load_model(args.model, config).cuda()
-    train_selfplay(model, args.data, config, epochs=args.epochs, lr=args.lr, cleanup=args.cleanup)
+    train_selfplay(model, args.data, config, epochs=args.epochs, lr=args.lr,
+                   cleanup=args.cleanup, max_samples=args.max_samples)
     save_model(model, args.model)
     print(f"Model saved to {args.model}")

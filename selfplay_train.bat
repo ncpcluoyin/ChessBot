@@ -19,6 +19,7 @@ echo ============================================================
     --data "%DATA%" ^
     --epochs %EPOCHS% ^
     --lr %LR% ^
+    --max-samples 50000 ^
     --cleanup
 
 echo.
