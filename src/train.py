@@ -257,14 +257,13 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                             out = np.zeros(4672, dtype=np.float32)
                             out[idx] = q
                         else:
-                            # 错误: 标签 50%, 模型 top-5 各 10%
+                            # 错误: 标签 50%, 模型 top-5 等差 14/12/10/8/6
                             order = np.argsort(probs)[::-1]
                             model_top = [j for j in order if j != label_idx][:5]
-                            all_idx = np.array([label_idx] + model_top)
                             out = np.zeros(4672, dtype=np.float32)
-                            out[label_idx] = 0.5
-                            for j in model_top:
-                                out[j] = 0.10
+                            out[label_idx] = 0.50
+                            for rank, j in enumerate(model_top):
+                                out[j] = 0.16 - rank * 0.02  # 14%, 12%, 10%, 8%, 6%
                         smooth_targets.append(out)
                     smooth_targets = torch.from_numpy(np.stack(smooth_targets)).to(config.device)
 
