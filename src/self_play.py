@@ -24,6 +24,7 @@ MAX_MOVES = 200
 def play_one_game(mcts, config, stop_event=None):
     board = chess.Board()
     samples = []
+    moves_history = []
     move_count = 0
 
     while not board.is_game_over() and move_count < MAX_MOVES:
@@ -45,6 +46,7 @@ def play_one_game(mcts, config, stop_event=None):
             move = _greedy_move(result.policy, board)
         if move is None:
             break
+        moves_history.append(move)
         board.push(move)
         move_count += 1
         if abs(result.root_value) > 5.0 and move_count > MIN_MOVES:
@@ -66,9 +68,31 @@ def play_one_game(mcts, config, stop_event=None):
     for j, s in enumerate(samples):
         s['value'] = white_result if (j % 2 == 0) else -white_result
         s['result'] = white_result
-        s['fen'] = board.fen()  # approximate, not exact per position
 
-    return samples, white_result, move_count
+    pgn_text = _build_pgn(moves_history, outcome, white_result)
+    return samples, white_result, move_count, pgn_text
+
+
+def _build_pgn(moves, outcome, white_result):
+    game = chess.pgn.Game()
+    node = game
+    for mv in moves:
+        node = node.add_variation(mv)
+    if outcome:
+        if outcome.winner == chess.WHITE:
+            game.headers["Result"] = "1-0"
+        elif outcome.winner == chess.BLACK:
+            game.headers["Result"] = "0-1"
+        else:
+            game.headers["Result"] = "1/2-1/2"
+    elif white_result > 0.5:
+        game.headers["Result"] = "1-0"
+    elif white_result < -0.5:
+        game.headers["Result"] = "0-1"
+    else:
+        game.headers["Result"] = "1/2-1/2"
+    exporter = chess.pgn.StringExporter(headers=True, variations=False, comments=False)
+    return game.accept(exporter)
 
 
 def _sample_move(policy, board):
@@ -121,7 +145,7 @@ def generate_games(mcts, config, num_games, output_dir, stop_event=None, verbose
         if stop_event and stop_event.is_set():
             break
         gc.collect()
-        samples, result, length = play_one_game(mcts, config, stop_event)
+        samples, result, length, pgn_text = play_one_game(mcts, config, stop_event)
         if len(samples) < 5:
             continue
         gh = _game_hash(samples)
@@ -135,7 +159,12 @@ def generate_games(mcts, config, num_games, output_dir, stop_event=None, verbose
             'result': result,
             'length': length,
             'hash': gh,
+            'pgn': pgn_text,
         }, path)
+        # Also save .pgn for inspection
+        pgn_path = os.path.join(output_dir, f'game_{start_idx + i:04d}.pgn')
+        with open(pgn_path, 'w') as f:
+            f.write(pgn_text)
 
         stats['total_positions'] += len(samples)
         if result > 0.5: stats['wins'] += 1
