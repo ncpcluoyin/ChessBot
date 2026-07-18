@@ -79,7 +79,7 @@ def play_one_game_raw(mcts_or_model, config, stop_event=None):
     return samples, white_result, move_count, pgn_text
 
 
-play_one_game = play_one_game_raw  # default (can be overridden)
+play_one_game = play_one_game_mcts  # default: MCTS
 
 
 def play_one_game_mcts(mcts, config, stop_event=None):
