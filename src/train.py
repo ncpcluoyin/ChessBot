@@ -217,7 +217,52 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                 policy_log_probs, value_pred = model(batch_input)
                 value_pred = value_pred.squeeze(-1)
 
-                policy_loss = -(batch_target_dist * policy_log_probs).sum(dim=-1).mean()
+                # ── 平滑策略目标 ──
+                with torch.no_grad():
+                    from src.board import move_index_to_uci
+                    model_probs = policy_log_probs.exp()  # (B, 4672)
+                    sf_labels = batch_target_dist.argmax(dim=-1)  # (B,)
+                    model_top1 = model_probs.argmax(dim=-1)
+                    match = (model_top1 == sf_labels)  # (B,) bool
+
+                    k = 10
+                    alpha = 0.35
+                    smooth_targets = []
+                    for i in range(model_probs.shape[0]):
+                        probs = model_probs[i].cpu().numpy()
+                        label_idx = int(sf_labels[i])
+
+                        if match[i]:
+                            # 正确: 平滑 top-10
+                            idx = np.argsort(probs)[::-1][:k]
+                            top_p = np.maximum(probs[idx], 1e-10)
+                            if label_idx not in idx:
+                                idx = np.append(idx[:k-1], label_idx)
+                                top_p = np.maximum(probs[idx], 1e-10)
+                            # 仅易位加权
+                            uci = move_index_to_uci(label_idx)
+                            if uci in ('e1g1', 'e8g8', 'e1c1', 'e8c8'):
+                                pos = np.where(idx == label_idx)[0]
+                                if len(pos) > 0:
+                                    top_p[pos[0]] *= 2.0
+                            q = top_p ** alpha
+                            q /= q.sum()
+                            out = np.zeros(4672, dtype=np.float32)
+                            out[idx] = q
+                        else:
+                            # 错误: 标签 top-1, 模型 top-5 变 top-2..6
+                            order = np.argsort(probs)[::-1]
+                            model_top = [j for j in order if j != label_idx][:5]
+                            all_idx = np.array([label_idx] + model_top)
+                            all_p = np.maximum(probs[all_idx], 1e-10)
+                            q = all_p ** alpha
+                            q /= q.sum()
+                            out = np.zeros(4672, dtype=np.float32)
+                            out[all_idx] = q
+                        smooth_targets.append(out)
+                    smooth_targets = torch.from_numpy(np.stack(smooth_targets)).to(config.device)
+
+                policy_loss = -(smooth_targets * policy_log_probs).sum(dim=-1).mean()
                 v_label = (batch_value * config.value_label_scale).clamp(-1, 1)
                 # 全范围 MSE (梯度 = 2*error, 大误差梯度更大)
                 value_loss = ((value_pred - v_label) ** 2).mean()
