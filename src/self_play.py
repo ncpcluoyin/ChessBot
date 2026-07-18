@@ -1,8 +1,10 @@
 """
-Self-play game generation. Saves games to disk, one .pt per game.
+Self-play game generation. Saves games to disk as .pt + .pgn.
+Press Ctrl+C to stop gracefully.
 """
 
-import gc, os, signal, sys, time, hashlib, json, glob
+import gc, os, signal, sys, time, hashlib, json, glob, threading
+from datetime import datetime
 import numpy as np
 import torch
 import chess
@@ -13,10 +15,7 @@ from src.network import load_model
 from src.mcts import get_mcts_engine
 
 TEMP_THRESHOLD = 30
-TEMPERATURE = 1.0
 TOP_K_SAMPLE = 3
-DIR_ALPHA = 0.3
-DIR_EPSILON = 0.25
 MIN_MOVES = 20
 MAX_MOVES = 200
 
@@ -35,9 +34,8 @@ def play_one_game(mcts, config, stop_event=None):
                               use_dirichlet=use_dd, stop_event=stop_event)
         if result is None or result.policy is None:
             break
-        tensor = board_to_tensor(board)
         samples.append({
-            'tensor': tensor,
+            'tensor': board_to_tensor(board),
             'policy': torch.from_numpy(result.policy.copy()).float(),
         })
         if move_count < TEMP_THRESHOLD:
@@ -64,7 +62,6 @@ def play_one_game(mcts, config, stop_event=None):
     else:
         white_result = 0.0
 
-    # STM-perspective value labels
     for j, s in enumerate(samples):
         s['value'] = white_result if (j % 2 == 0) else -white_result
         s['result'] = white_result
@@ -122,65 +119,46 @@ def _greedy_move(policy, board):
     return legals[indices.index(best)]
 
 
-def _game_hash(samples):
-    h = hashlib.md5()
-    for s in samples:
-        h.update(s['tensor'].numpy().tobytes())
-    return h.hexdigest()[:16]
-
-
-def generate_games(mcts, config, num_games, output_dir, stop_event=None, verbose=True):
+def generate_games(mcts, config, output_dir, stop_event=None, verbose=True, max_games=0):
+    """Generate games until stopped or max_games reached."""
     os.makedirs(output_dir, exist_ok=True)
-    existing = [f for f in os.listdir(output_dir) if f.startswith('game_') and f.endswith('.pt')]
-    start_idx = 0
-    if existing:
-        nums = [int(f.replace('game_','').replace('.pt','')) for f in existing]
-        start_idx = max(nums) + 1
-
-    seen_hashes = set()
-    stats = {'wins': 0, 'losses': 0, 'draws': 0, 'total_positions': 0}
+    prefix = datetime.now().strftime('%Y%m%d_%H%M%S')
+    count = 0
+    stats = {'wins': 0, 'losses': 0, 'draws': 0}
     t0 = time.time()
 
-    for i in range(num_games):
-        if stop_event and stop_event.is_set():
-            break
+    while (stop_event is None or not stop_event.is_set()) and (max_games == 0 or count < max_games):
         gc.collect()
         samples, result, length, pgn_text = play_one_game(mcts, config, stop_event)
         if len(samples) < 5:
             continue
-        gh = _game_hash(samples)
-        if gh in seen_hashes:
-            continue
-        seen_hashes.add(gh)
 
-        path = os.path.join(output_dir, f'game_{start_idx + i:04d}.pt')
+        path = os.path.join(output_dir, f'{prefix}_{count:04d}.pt')
         torch.save({
             'samples': samples,
             'result': result,
             'length': length,
-            'hash': gh,
             'pgn': pgn_text,
         }, path)
-        # Also save .pgn for inspection
-        pgn_path = os.path.join(output_dir, f'game_{start_idx + i:04d}.pgn')
+        pgn_path = os.path.join(output_dir, f'{prefix}_{count:04d}.pgn')
         with open(pgn_path, 'w') as f:
             f.write(pgn_text)
 
-        stats['total_positions'] += len(samples)
         if result > 0.5: stats['wins'] += 1
         elif result < -0.5: stats['losses'] += 1
         else: stats['draws'] += 1
+        count += 1
 
         if verbose:
             elapsed = time.time() - t0
-            print(f"  [{i+1}/{num_games}] {length:3d} pos  "
+            rate = count / elapsed * 3600 if elapsed > 0 else 0
+            print(f"  [{prefix}_{count-1:04d}] {length:3d} pos  "
                   f"W/B/D {stats['wins']}/{stats['losses']}/{stats['draws']}  "
-                  f"({elapsed:.0f}s)", flush=True)
+                  f"{rate:.0f} games/hr", flush=True)
 
     elapsed = time.time() - t0
     total = stats['wins'] + stats['losses'] + stats['draws']
-    print(f"  Generated {total} games, {stats['total_positions']} positions, {elapsed:.0f}s",
-          flush=True)
+    print(f"\\nGenerated {total} games, {elapsed:.0f}s total", flush=True)
     return stats
 
 
@@ -188,7 +166,7 @@ if __name__ == '__main__':
     import argparse
     p = argparse.ArgumentParser()
     p.add_argument("--model", required=True)
-    p.add_argument("--games", type=int, default=200)
+    p.add_argument("--games", type=int, default=0, help="0=continuous, N=stop after N games")
     p.add_argument("--sims", type=int, default=800)
     p.add_argument("--workers", type=int, default=12)
     p.add_argument("--output", default="data/self_play_games")
@@ -205,14 +183,22 @@ if __name__ == '__main__':
     engine = get_mcts_engine(model, config)
     engine._ensure_pool()
 
+    stop_evt = threading.Event()
     def _on_int(sig, frame):
-        print("\n[Interrupted]")
-        if stop_evt: stop_evt.set()
+        print("\n[Stopping...]")
+        stop_evt.set()
     import signal as _sig
-    stop_evt = None
     _sig.signal(_sig.SIGINT, _on_int)
 
+    if args.games > 0:
+        # Fixed count mode (for daemon loop)
+        _games_remaining = [args.games]
+        def _stop_after_n():
+            _games_remaining[0] -= 1
+            return _games_remaining[0] <= 0
+
+    print(f"Generating games to {args.output} (Ctrl+C to stop)...")
     try:
-        generate_games(engine, config, args.games, args.output)
+        generate_games(engine, config, args.output, stop_evt, max_games=args.games)
     finally:
         engine.shutdown()

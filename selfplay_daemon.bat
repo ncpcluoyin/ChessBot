@@ -12,33 +12,33 @@ set EPOCHS=%SP_EPOCHS%
 if "%EPOCHS%"=="" set EPOCHS=5
 set CYCLES=%SP_CYCLES%
 if "%CYCLES%"=="" set CYCLES=20
-set DATA=data\self_play_games
+set LR=%SP_LR%
+if "%LR%"=="" set LR=0.001
 
 echo ============================================================
-echo   Self-Play Training
+echo   Self-Play Training Pipeline
 echo   Model:   %MODEL%
 echo   Games:   %GAMES% per cycle, %SIMS% sims
-echo   Train:   %EPOCHS% epochs per cycle
+echo   Train:   %EPOCHS% epochs per cycle, lr=%LR%
 echo   Cycles:  %CYCLES%
 echo ============================================================
 
 for /l %%c in (1,1,%CYCLES%) do (
     echo.
     echo ===== Cycle %%c/%CYCLES% =====
-    echo --- Generating games ---
     .venv311\Scripts\python.exe -u -m src.self_play ^
         --model "%MODEL%" ^
         --games %GAMES% ^
         --sims %SIMS% ^
         --workers %WORKERS% ^
-        --output "%DATA%"
+        --output "data\self_play_games"
     if errorlevel 1 goto err
 
-    echo --- Training ---
     .venv311\Scripts\python.exe -u src\self_play_train.py ^
         --model "%MODEL%" ^
-        --data "%DATA%" ^
-        --epochs %EPOCHS%
+        --data "data\self_play_games" ^
+        --epochs %EPOCHS% ^
+        --lr %LR%
     if errorlevel 1 goto err
 )
 
@@ -48,6 +48,6 @@ pause
 exit /b 0
 
 :err
-echo [Error in cycle %%c]
+echo [Error]
 pause
 exit /b 1
