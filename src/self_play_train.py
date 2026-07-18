@@ -15,7 +15,7 @@ from src.board import board_to_tensor
 torch.set_float32_matmul_precision('high')
 
 
-def train_selfplay(model, game_dir, config, epochs=5, batch_size=1024, lr=0.001, cleanup=False, max_samples=0):
+def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001, cleanup=False, max_samples=50000):
     """Load self-play games from game_dir and train. If cleanup, delete .pt/.pgn after training."""
     files = sorted(glob.glob(os.path.join(game_dir, '*.pt')))
     if not files:
