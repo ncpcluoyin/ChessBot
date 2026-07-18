@@ -7,6 +7,7 @@ import gc, os, signal, sys, time, hashlib, json, glob, threading
 from datetime import datetime
 import numpy as np
 import torch
+import torch.nn.functional as F
 import chess
 import chess.pgn
 
@@ -21,7 +22,67 @@ MIN_MOVES = 20
 MAX_MOVES = 200
 
 
-def play_one_game(mcts, config, stop_event=None):
+_raw_model = None
+
+def play_one_game_raw(mcts_or_model, config, stop_event=None):
+    """Raw NN policy + temperature sampling (no MCTS). Much faster."""
+    global _raw_model
+    model = _raw_model if _raw_model is not None else mcts_or_model
+    board = chess.Board()
+    samples = []
+    moves_history = []
+    move_count = 0
+
+    while not board.is_game_over() and move_count < MAX_MOVES:
+        if stop_event and stop_event.is_set():
+            break
+
+        t = board_to_tensor(board).unsqueeze(0).cuda()
+        with torch.no_grad():
+            pol_log, v = model(t)
+        pol = pol_log.squeeze(0).exp().cpu().numpy()
+        val = float(v.squeeze(-1).cpu().item())
+
+        samples.append({
+            'tensor': board_to_tensor(board),
+            'policy': torch.from_numpy(pol.copy()).float(),
+        })
+
+        use_dd = move_count < TEMP_THRESHOLD
+        if use_dd:
+            move = _sample_move(pol, board)
+        else:
+            move = _greedy_move(pol, board)
+        if move is None:
+            break
+        moves_history.append(move)
+        board.push(move)
+        move_count += 1
+        if abs(val) > 5.0 and move_count > MIN_MOVES:
+            break
+
+    outcome = board.outcome()
+    if outcome is None:
+        white_result = max(-1.0, min(1.0, val))
+    elif outcome.winner == chess.WHITE:
+        white_result = 1.0
+    elif outcome.winner == chess.BLACK:
+        white_result = -1.0
+    else:
+        white_result = 0.0
+
+    for j, s in enumerate(samples):
+        s['value'] = white_result if (j % 2 == 0) else -white_result
+        s['result'] = white_result
+
+    pgn_text = _build_pgn(moves_history, outcome, white_result)
+    return samples, white_result, move_count, pgn_text
+
+
+play_one_game = play_one_game_raw  # default (can be overridden)
+
+
+def play_one_game_mcts(mcts, config, stop_event=None):
     board = chess.Board()
     samples = []
     moves_history = []
