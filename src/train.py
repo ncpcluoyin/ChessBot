@@ -59,8 +59,7 @@ def collate_fn_selfplay(batch):
 def train_distill(config: Config, data_dir: str, epochs: int = 100,
                   model_path: str = None, num_workers: int = 0,
                   resume: bool = False, max_games: int = 0,
-                  game_offset: int = 0, freeze: bool = False,
-                  recover: bool = False, dual_lr: bool = False):
+                  game_offset: int = 0):
     if model_path is None:
         model_path = os.path.join(config.model_dir, "model_sf.pt")
 
@@ -83,54 +82,32 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
             ckpt = torch.load(cp_path, map_location="cpu", weights_only=False)
             start_epoch = ckpt.get("epoch", 0)
             total_epochs = ckpt.get("total_epochs", epochs)
-            if not freeze:
-                opt_state = ckpt.get("optimizer")
-                sched_state = ckpt.get("scheduler")
-                # 加载 EMA 参数
-                ema_ckpt = ckpt.get("ema_params")
-                if ema_ckpt is not None and len(ema_ckpt) == len(ema_params):
-                    skipped_ema = 0
-                    for dst, src in zip(ema_params, ema_ckpt):
-                        if dst.shape == src.shape:
-                            dst.copy_(src)
-                        else:
-                            skipped_ema += 1
-                    if skipped_ema:
-                        print(f"  EMA 跳过 {skipped_ema} 个形状不匹配的参数")
-                    ema_loaded = True
-                    print(f"  EMA 已加载 ({len(ema_ckpt)} 参数)")
+            opt_state = ckpt.get("optimizer")
+            sched_state = ckpt.get("scheduler")
+            # 加载 EMA 参数
+            ema_ckpt = ckpt.get("ema_params")
+            if ema_ckpt is not None and len(ema_ckpt) == len(ema_params):
+                skipped_ema = 0
+                for dst, src in zip(ema_params, ema_ckpt):
+                    if dst.shape == src.shape:
+                        dst.copy_(src)
+                    else:
+                        skipped_ema += 1
+                if skipped_ema:
+                    print(f"  EMA 跳过 {skipped_ema} 个形状不匹配的参数")
+                ema_loaded = True
+                print(f"  EMA 已加载 ({len(ema_ckpt)} 参数)")
             # 如果 CLI --epochs 大于 checkpoint 的 total_epochs, 扩展周期
             if epochs > total_epochs:
                 total_epochs = epochs
                 sched_state = None
                 print(f"  调度器重置: T_max={total_epochs}")
-        mode = "冻结" if freeze else "续训"
-        print(f"从 epoch {start_epoch} {mode}训练")
+        print(f"从 epoch {start_epoch} 续训训练")
     else:
         model = create_model(config).to(config.device)
         model.train()
         trainable_params = [p for p in model.parameters() if p.requires_grad]
         ema_params = [p.detach().clone() for p in trainable_params]
-
-    if freeze:
-        for n, p in model.named_parameters():
-            if not n.startswith('value_'):
-                p.requires_grad = False
-        n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"  冻结骨干+策略头, 只训值头 ({n_trainable:,} 参数)")
-
-    if recover:
-        trainable_prefixes = ('reduce_conv.', 'policy_fc1.', 'policy_fc2.',
-                              'value_fc1.', 'value_fc_hidden.', 'value_fc2.')
-        for n, p in model.named_parameters():
-            p.requires_grad = any(n.startswith(pre) for pre in trainable_prefixes)
-        n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"  恢复训练: 冻结骨干, 只训新头 ({n_trainable:,} 参数)")
-        # 骨干 BN 设为 eval 模式, 防止 running stats 更新
-        for n, m in model.named_modules():
-            if isinstance(m, (nn.BatchNorm2d, nn.BatchNorm1d)):
-                if not any(n.startswith(pre) for pre in trainable_prefixes):
-                    m.eval()
 
     total_games = SFDistillDataset(data_dir, max_games=0, game_offset=0).total_games
     # 启用 TensorFloat-32 (RTX 30xx+ Tensor Core), fp32 精度 2x 加速
@@ -151,9 +128,6 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
         backbone_params, lr=config.learning_rate, weight_decay=config.weight_decay)
     value_optimizer = torch.optim.AdamW(
         value_params, lr=config.learning_rate, weight_decay=config.weight_decay)
-
-    if dual_lr:
-        print(f"  双 LR: 骨干=0.1x ({config.learning_rate*0.1:.6f})  值头=1.0x ({config.learning_rate:.4f})")
 
     # 余弦衰减 (手动计算每个 epoch 的 LR)
     _lr_min = config.learning_rate * 0.01
@@ -199,17 +173,10 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
             # ── 手动余弦 LR ──
             cos_val = 0.5 * (1 + math.cos(math.pi * epoch / total_epochs))
             _cos_lr = _lr_min + _lr_range * cos_val
-            if dual_lr:
-                backbone_lr = (_lr_min * 0.1) + (_lr_range * 0.1) * cos_val
-                for g in optimizer.param_groups:
-                    g['lr'] = backbone_lr
-                for g in value_optimizer.param_groups:
-                    g['lr'] = _cos_lr
-            else:
-                for g in optimizer.param_groups:
-                    g['lr'] = _cos_lr
-                for g in value_optimizer.param_groups:
-                    g['lr'] = _cos_lr
+            for g in optimizer.param_groups:
+                g['lr'] = _cos_lr
+            for g in value_optimizer.param_groups:
+                g['lr'] = _cos_lr
 
             for p in model.parameters():
                 p.requires_grad = True

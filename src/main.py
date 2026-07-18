@@ -50,10 +50,7 @@ def main():
         train_distill(config, data_dir=args.data, epochs=args.epochs,
                       model_path=args.model, num_workers=args.workers,
                       resume=args.resume, max_games=args.max_games,
-                      game_offset=args.game_offset,
-                      freeze=getattr(args, 'freeze', False),
-                      recover=getattr(args, 'recover', False),
-                      dual_lr=getattr(args, 'dual_lr', False))
+                      game_offset=args.game_offset)
 
 
 def _run_uci(config: Config, model_path: str = None, intuition: bool = False):
