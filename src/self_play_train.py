@@ -15,7 +15,23 @@ from src.board import board_to_tensor
 torch.set_float32_matmul_precision('high')
 
 
-def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001, cleanup=False, max_samples=50000):
+def _save_ema_model(model, trainable_params, ema_params, ema_path):
+    """将 EMA 权重写入模型副本并保存。"""
+    import copy
+    model_cpu = copy.deepcopy(model).cpu()
+    state = model_cpu.state_dict()
+    ema_idx = 0
+    for name, param in model_cpu.named_parameters():
+        if ema_idx < len(ema_params):
+            state[name].copy_(ema_params[ema_idx])
+            ema_idx += 1
+    model_cpu.load_state_dict(state)
+    torch.save(model_cpu.state_dict(), ema_path)
+    del model_cpu
+
+
+def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001,
+                   cleanup=False, max_samples=50000, ema_decay=0.999):
     """Load self-play games from game_dir and train. If cleanup, delete .pt/.pgn after training."""
     files = sorted(glob.glob(os.path.join(game_dir, '*.pt')))
     if not files:
@@ -42,6 +58,11 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001, 
     model.train()
     model = model.to(config.device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
+
+    # ── EMA 初始化 ──
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
+    ema_params = [p.detach().clone() for p in trainable_params]
+
     indices = list(range(len(samples)))
     total_loss = 0.0
     n_batches = 0
@@ -63,6 +84,11 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001, 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
             optimizer.step()
+
+            # ── EMA 更新 ──
+            for p, ema_p in zip(trainable_params, ema_params):
+                ema_p.mul_(ema_decay).add_(p.detach(), alpha=1 - ema_decay)
+
             total_loss += loss.item()
             n_batches += 1
 
@@ -82,7 +108,7 @@ def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001, 
             os.remove(f)
         print(f"Cleaned {n_pt} .pt + {n_pgn} .pgn files")
 
-    return total_loss / max(n_batches, 1)
+    return total_loss / max(n_batches, 1), ema_params, trainable_params
 
 
 if __name__ == '__main__':
@@ -99,7 +125,13 @@ if __name__ == '__main__':
     config = Config()
     config.device = 'cuda'
     model = load_model(args.model, config).cuda()
-    train_selfplay(model, args.data, config, epochs=args.epochs, lr=args.lr,
-                   cleanup=args.cleanup, max_samples=args.max_samples)
+    loss, ema_params, trainable_params = train_selfplay(
+        model, args.data, config, epochs=args.epochs, lr=args.lr,
+        cleanup=args.cleanup, max_samples=args.max_samples)
     save_model(model, args.model)
     print(f"Model saved to {args.model}")
+
+    # 保存 EMA 模型
+    ema_path = args.model.replace(".pt", "_ema.pt")
+    _save_ema_model(model, trainable_params, ema_params, ema_path)
+    print(f"EMA model saved to {ema_path}")
