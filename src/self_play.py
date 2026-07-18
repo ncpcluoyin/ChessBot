@@ -138,9 +138,21 @@ def generate_games(mcts, config, output_dir, stop_event=None, verbose=True, max_
 
     while (stop_event is None or not stop_event.is_set()) and (max_games == 0 or count < max_games):
         gc.collect()
-        samples, result, length, pgn_text = play_one_game(mcts, config, stop_event)
+        try:
+            samples, result, length, pgn_text = play_one_game(mcts, config, stop_event)
+        except Exception as e:
+            print(f"  [!] Game error: {e}", flush=True)
+            continue
         if len(samples) < 5:
             continue
+
+        # 每 10 局打印一次保活信号
+        if count % 10 == 0 and verbose:
+            elapsed = time.time() - t0
+            rate = count / (elapsed + 1e-6) * 3600
+            total = stats['wins'] + stats['losses'] + stats['draws']
+            print(f"  [{count} games] W/B/D {stats['wins']}/{stats['losses']}/{stats['draws']}  "
+                  f"{rate:.0f} games/hr  ({elapsed:.0f}s)", flush=True)
 
         path = os.path.join(output_dir, f'{prefix}_{count:04d}.pt')
         torch.save({
@@ -157,13 +169,6 @@ def generate_games(mcts, config, output_dir, stop_event=None, verbose=True, max_
         elif result < -0.5: stats['losses'] += 1
         else: stats['draws'] += 1
         count += 1
-
-        if verbose:
-            elapsed = time.time() - t0
-            rate = count / elapsed * 3600 if elapsed > 0 else 0
-            print(f"  [{prefix}_{count-1:04d}] {length:3d} pos  "
-                  f"W/B/D {stats['wins']}/{stats['losses']}/{stats['draws']}  "
-                  f"{rate:.0f} games/hr", flush=True)
 
     elapsed = time.time() - t0
     total = stats['wins'] + stats['losses'] + stats['draws']

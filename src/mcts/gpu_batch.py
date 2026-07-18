@@ -137,9 +137,11 @@ def _get_top_k(priors, moves, depth):
     cum = 0.0
     base_k = 0
     for i, j in enumerate(idx):
+        if priors[j] < 1e-6:  # 跳过接近 0 的走法
+            break
         cum += priors[j]
         base_k = i + 1
-        if cum >= 0.90:
+        if cum >= 0.85:
             break
     base_k = max(4, min(18, base_k))
     k = int(base_k / (1 + 0.25 * depth))
@@ -607,13 +609,13 @@ class BatchGPUEngine(MCTSEngine):
         # Drain stale state from previous search (req_q + res_qs)
         import sys as _sys
         if self._gpu_proc is not None and not self._gpu_proc.is_alive():
-            _sys.stderr.write(f"[DBG] GPU DEAD! sid={sid}\n")
+            
             _sys.stderr.flush()
             self._pool_ready = False
             self._ensure_pool()
         for wid, w in enumerate(self._workers):
             if not w.is_alive():
-                _sys.stderr.write(f"[DBG] Worker {wid} DEAD! sid={sid}\n")
+                
                 _sys.stderr.flush()
         _stale = 0
         while True:
@@ -629,7 +631,7 @@ class BatchGPUEngine(MCTSEngine):
                 except:
                     break
         if _stale > 0:
-            _sys.stderr.write(f"[DBG] sid={sid} drained {_stale} stale req\n")
+            
             _sys.stderr.flush()
 
         board_fen = board.fen()
@@ -705,7 +707,7 @@ class BatchGPUEngine(MCTSEngine):
                 time.sleep(0.01)
                 if not any(p.is_alive() for p in self._workers):
                     import sys as _sys
-                    _sys.stderr.write(f"[DBG] sid={sid} workers ALL DEAD, "
+                    
                                       f"pending={pending_workers}\n")
                     _sys.stderr.flush()
                     break
@@ -735,7 +737,7 @@ class BatchGPUEngine(MCTSEngine):
                     break
 
         if not merged:
-            _sys.stderr.write(f"[DBG] sid={sid} merged EMPTY, "
+            
                               f"pending={pending_workers} "
                               f"alive={[p.is_alive() for p in self._workers]}\n")
             _sys.stderr.flush()
@@ -764,7 +766,7 @@ class BatchGPUEngine(MCTSEngine):
             best_move = chess.Move.from_uci(best_uci)
             if best_move not in board.legal_moves:
                 import sys as _sys
-                _sys.stderr.write(f"[DBG] sid={sid} illegal best_uci={best_uci}, "
+                
                                   f"merged keys={list(merged.keys())[:10]}\n")
                 _sys.stderr.flush()
                 raise ValueError("not legal")
