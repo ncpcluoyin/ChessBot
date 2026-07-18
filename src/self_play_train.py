@@ -137,6 +137,14 @@ if __name__ == '__main__':
     if ema_params is None:
         print("No data, skipping model save")
         sys.exit(0)
+
+    # 备份旧模型
+    old_path = args.model.replace(".pt", "_old.pt")
+    if os.path.exists(args.model):
+        import shutil
+        shutil.copy2(args.model, old_path)
+        print(f"Old model backed up to {old_path}")
+
     save_model(model, args.model)
     print(f"Model saved to {args.model}")
 
