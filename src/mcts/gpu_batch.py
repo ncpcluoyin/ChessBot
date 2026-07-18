@@ -343,7 +343,7 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
             path = [root]
             current = root
             root_n = root.n + root.virtual_n
-            log_sqrt = math.sqrt(math.log(root_n + 1e-8)) if root_n > 0 else 1.0
+            log_sqrt = math.sqrt(max(root_n, 1))  # AlphaZero: sqrt(N_parent)
 
             while current.children:
                 best_uci = None
