@@ -32,8 +32,15 @@ def _save_ema_model(model, trainable_params, ema_params, ema_path):
 
 def train_selfplay(model, game_dir, config, epochs=5, batch_size=512, lr=0.001,
                    cleanup=False, max_samples=50000, ema_decay=0.999):
-    """Load self-play games from game_dir and train. If cleanup, delete .pt/.pgn after training."""
-    files = sorted(glob.glob(os.path.join(game_dir, '*.pt')))
+    """Load self-play games from game_dir (str or list[str])."""
+    if isinstance(game_dir, str):
+        dirs = [game_dir]
+    else:
+        dirs = game_dir
+
+    files = []
+    for d in dirs:
+        files.extend(sorted(glob.glob(os.path.join(d, '*.pt'))))
     if not files:
         print(f"No .pt files found in {game_dir}")
         return 0.0, None, None
@@ -138,7 +145,7 @@ if __name__ == '__main__':
         print("No data, skipping model save")
         sys.exit(0)
 
-    # 备份旧模型
+    # 备份旧模型 (覆盖旧备份)
     old_path = args.model.replace(".pt", "_old.pt")
     if os.path.exists(args.model):
         import shutil

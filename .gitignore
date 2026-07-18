@@ -30,3 +30,7 @@ eval_selfplay.bat
 Thumbs.db
 src/tiny_net.py
 src/train_policy_only.py
+src/smooth_policy.py
+src/smooth_distill.py
+selfplay_loop.bat
+src/selfplay_loop.py
