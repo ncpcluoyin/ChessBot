@@ -3,8 +3,8 @@ cd /d "%~dp0"
 
 set MODEL=data\models\model_sf.pt
 set DATA=data\self_play_games
-set EPOCHS=5
-set LR=0.001
+set EPOCHS=3
+set LR=0.0001
 
 echo ============================================================
 echo   Self-Play Training
