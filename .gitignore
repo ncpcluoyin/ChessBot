@@ -15,10 +15,14 @@ data/models/*
 .vscode/
 .idea/
 
-# 测试脚本
+# 测试脚本 (本地, 不上传)
 test_*.py
 test_*.bat
 mem_profile.py
+random_bot.bat
+tests/
+test/
+eval_selfplay.bat
 
 # 系统
 *.log
