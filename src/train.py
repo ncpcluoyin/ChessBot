@@ -243,8 +243,7 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                             # 锐度 = top-1 概率 (越高越尖锐)
                             sharpness = top_p[0]
                             if sharpness > 0.5:
-                                # 高锐度: 平滑
-                                # 仅易位加权
+                                # 高锐度: 幂变换平滑 (易位 ×2 在变换前)
                                 uci = move_index_to_uci(label_idx)
                                 if uci in ('e1g1', 'e8g8', 'e1c1', 'e8c8'):
                                     pos = np.where(idx == label_idx)[0]
@@ -253,20 +252,19 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                                 q = top_p ** alpha
                                 q /= q.sum()
                             else:
-                                # 已经够平滑, 保持原分布 (归一化即可)
+                                # 已够平滑, 保持原分布 (仅归一化)
                                 q = top_p / top_p.sum()
                             out = np.zeros(4672, dtype=np.float32)
                             out[idx] = q
                         else:
-                            # 错误: 标签 top-1, 模型 top-5 变 top-2..6
+                            # 错误: 标签 50%, 模型 top-5 各 10%
                             order = np.argsort(probs)[::-1]
                             model_top = [j for j in order if j != label_idx][:5]
                             all_idx = np.array([label_idx] + model_top)
-                            all_p = np.maximum(probs[all_idx], 1e-10)
-                            q = all_p ** alpha
-                            q /= q.sum()
                             out = np.zeros(4672, dtype=np.float32)
-                            out[all_idx] = q
+                            out[label_idx] = 0.5
+                            for j in model_top:
+                                out[j] = 0.10
                         smooth_targets.append(out)
                     smooth_targets = torch.from_numpy(np.stack(smooth_targets)).to(config.device)
 
