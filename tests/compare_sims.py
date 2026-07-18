@@ -1,9 +1,8 @@
 """
-Compare move selection quality across simulation budgets.
-40000 sims = ground truth. Stockfish depth=25 eval for each candidate move.
+Compare move selection across simulation budgets against both Stockfish depth=25 and 40000-sim MCTS.
 """
 
-import os, sys, time, gc, subprocess
+import os, sys, time, gc
 import numpy as np
 import chess
 import chess.engine
@@ -18,15 +17,26 @@ from src.mcts import get_mcts_engine
 torch.set_float32_matmul_precision('high')
 
 SIM_BUDGETS = [100, 200, 400, 1000, 4000, 10000, 40000]
-GROUND = 40000
 SF_PATH = r"stockfish-windows-x86-64-avxvnni.exe"
 
 
-def score_with_sf(board, move, sf_engine, depth=25):
-    """Evaluate position after `move` using Stockfish at `depth`, return centipawn score (STM)."""
+def sf_best_move(board, sf, depth=25):
+    """Return Stockfish's best move and its score (cp, STM)."""
+    info = sf.play(board, chess.engine.Limit(depth=depth))
+    best = info.move
+    # eval after playing best move
+    b = board.copy()
+    b.push(best)
+    info2 = sf.analyse(b, chess.engine.Limit(depth=depth))
+    score = info2["score"].pov(chess.WHITE)
+    return best, score.score(mate_score=10000)
+
+
+def eval_move(board, move, sf, depth=25):
+    """Evaluate position after `move`, return centipawn score (STM)."""
     b = board.copy()
     b.push(move)
-    info = sf_engine.analyse(b, chess.engine.Limit(depth=depth))
+    info = sf.analyse(b, chess.engine.Limit(depth=depth))
     score = info["score"].pov(chess.WHITE)
     return score.score(mate_score=10000)
 
@@ -43,7 +53,7 @@ def pick_move(result, board):
 def evaluate():
     config = Config()
     config.num_mcts_workers = 8
-    model_path = "data/models/model_sf.pt"
+    model_path = "data/models/model_sf_ema.pt"
 
     print(f"Loading model: {model_path}")
     model = load_model(model_path, config).cuda().eval()
@@ -55,9 +65,9 @@ def evaluate():
     sf.configure({"Threads": 4, "Hash": 512})
 
     for game_idx in range(3):
-        print(f"\n{'='*70}")
+        print(f"\n{'='*80}")
         print(f"Game {game_idx+1}/3")
-        print(f"{'='*70}")
+        print(f"{'='*80}")
 
         board = chess.Board()
         for pos_idx in range(10):
@@ -68,7 +78,11 @@ def evaluate():
             stm = "w" if board.turn == chess.WHITE else "b"
             print(f"\n  [{pos_idx+1}] move {board.fullmove_number}{stm}  {fen[:60]}")
 
-            # Run all sim budgets at this position
+            # --- Reference: Stockfish best move + score ---
+            sf_ref_move, sf_ref_score = sf_best_move(board, sf)
+            print(f"    Stockfish d25: {sf_ref_move.uci():6s}  SF={sf_ref_score:+5d}")
+
+            # --- Run all MCTS budgets ---
             results = {}
             for sims in SIM_BUDGETS:
                 gc.collect()
@@ -76,27 +90,29 @@ def evaluate():
                 mv, prob = pick_move(result, board)
                 results[sims] = (mv, prob)
 
-            ground_move, _ = results[GROUND]
+            ground_move, _ = results[40000]
             if ground_move is None:
-                print("    (no legal move, skipping)")
                 break
+            sf_ground = eval_move(board, ground_move, sf)
+            print(f"    MCTS 40000:   {ground_move.uci():6s}  SF={sf_ground:+5d}  (dSF={sf_ground-sf_ref_score:+4d})")
 
-            # Score ground-truth move with Stockfish
-            sf_ground = score_with_sf(board, ground_move, sf)
-            print(f"    {GROUND:5d} sims: {ground_move.uci():6s}  SF={sf_ground:+5d}  (ground truth)")
-
+            # --- Compare each budget ---
             for sims in SIM_BUDGETS[:-1]:
                 mv, prob = results[sims]
                 if mv is None:
                     continue
-                sf_score = score_with_sf(board, mv, sf)
-                match = "OK" if mv == ground_move else "XX"
-                delta = sf_score - sf_ground
-                worse = " <<<" if delta < -30 else (" >>>" if delta > 30 else "")
+                sf_score = eval_move(board, mv, sf)
+                match_40000 = "OK" if mv == ground_move else "XX"
+                match_sf = "OK" if mv == sf_ref_move else "XX"
+                d_sf = sf_score - sf_ref_score
+                d_40000 = sf_score - sf_ground
+                worse = " <<<" if d_sf < -30 else ""
+                better = " >>>" if d_sf > 30 else ""
                 print(f"    {sims:5d} sims: {mv.uci():6s}  p={prob*100:5.1f}%  "
-                      f"SF={sf_score:+5d} (d={delta:+4d})  {match}{worse}", flush=True)
+                      f"SF={sf_score:+5d} (dSF={d_sf:+4d}, d40k={d_40000:+4d})  "
+                      f"vsSF={match_sf} vs40k={match_40000}{worse}{better}", flush=True)
 
-            # Advance with ground-truth move
+            # Advance with 40000-sim move
             board.push(ground_move)
 
     sf.quit()
