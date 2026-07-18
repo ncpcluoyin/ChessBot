@@ -28,3 +28,4 @@ eval_selfplay.bat
 *.log
 .DS_Store
 Thumbs.db
+src/tiny_net.py
