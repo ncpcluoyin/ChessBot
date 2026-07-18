@@ -559,7 +559,7 @@ class BatchGPUEngine(MCTSEngine):
         warm_sid = -1
         for wid in range(self.num_workers):
             self._cmd_qs[wid].put(
-                ('search', chess.STARTING_FEN, 3, self.config.c_puct, self.config.virtual_loss, warm_sid, wid * 50000))
+                ('search', chess.STARTING_FEN, 3, self.config.c_puct * min(1.0, 3/400.0), self.config.virtual_loss, warm_sid, wid * 50000))
 
         # Drain all warmup results from progress_q
         warm_remaining = set(range(self.num_workers))
@@ -633,6 +633,9 @@ class BatchGPUEngine(MCTSEngine):
             
             _sys.stderr.flush()
 
+        # 动态 c_puct: 低搜索量时更 exploit
+        c_puct_eff = self.config.c_puct * min(1.0, num_simulations / 400.0)
+
         board_fen = board.fen()
         per_worker = num_simulations // self.num_workers
         remainder = num_simulations % self.num_workers
@@ -642,7 +645,7 @@ class BatchGPUEngine(MCTSEngine):
         for wid in range(self.num_workers):
             n_sims = per_worker + (1 if wid < remainder else 0)
             self._cmd_qs[wid].put(
-                ('search', board_fen, n_sims, self.config.c_puct, self.config.virtual_loss, sid, offset))
+                ('search', board_fen, n_sims, c_puct_eff, self.config.virtual_loss, sid, offset))
         import sys as _sys2
         _sys2.stderr.flush()
 
