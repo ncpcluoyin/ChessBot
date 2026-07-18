@@ -352,7 +352,7 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
                 for uci, child in current.children.items():
                     eff_n = child.n + child.virtual_n
                     instant_q = (child.q * child.n - virtual_loss * child.virtual_n) / max(eff_n, 1)
-                    sc = instant_q + c_puct * child.p * log_sqrt / math.sqrt(1 + eff_n)
+                    sc = instant_q + c_puct * math.sqrt(child.p) * log_sqrt / math.sqrt(1 + eff_n)
                     if sc > best_score:
                         best_score = sc
                         best_uci = uci

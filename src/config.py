@@ -38,7 +38,7 @@ class Config:
 
     # --- MCTS ---
     mcts_simulations: int = 2000
-    c_puct: float = 2.5
+    c_puct: float = 1.0
     dirichlet_alpha: float = 0.3
     dirichlet_epsilon: float = 0.25
     virtual_loss: float = 0.5
