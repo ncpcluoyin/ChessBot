@@ -21,8 +21,8 @@ TOP_K_SAMPLE = 3
 MIN_MOVES = 20
 MAX_MOVES = 200
 
+_raw_model = None  # for raw-policy mode
 
-_raw_model = None
 
 def play_one_game_raw(mcts_or_model, config, stop_event=None):
     """Raw NN policy + temperature sampling (no MCTS). Much faster."""
@@ -244,6 +244,7 @@ if __name__ == '__main__':
     p.add_argument("--games", type=int, default=0, help="0=continuous, N=stop after N games")
     p.add_argument("--sims", type=int, default=800)
     p.add_argument("--workers", type=int, default=12)
+    p.add_argument("--raw-policy", action="store_true", help="Use raw NN + temperature (no MCTS)")
     p.add_argument("--output", default="data/self_play_games")
     args = p.parse_args()
 
@@ -255,8 +256,14 @@ if __name__ == '__main__':
     model = load_model(args.model, config).cuda().eval()
     print(f"Model: {sum(p.numel() for p in model.parameters())/1e6:.1f}M")
 
-    engine = get_mcts_engine(model, config)
-    engine._ensure_pool()
+    if args.raw_policy:
+        _raw_model = model
+        play_one_game = play_one_game_raw
+        engine = None
+        print("Mode: raw policy + temperature (no MCTS)")
+    else:
+        engine = get_mcts_engine(model, config)
+        engine._ensure_pool()
 
     stop_evt = threading.Event()
     def _on_int(sig, frame):
@@ -276,4 +283,5 @@ if __name__ == '__main__':
     try:
         generate_games(engine, config, args.output, stop_evt, max_games=args.games)
     finally:
-        engine.shutdown()
+        if engine is not None:
+            engine.shutdown()
