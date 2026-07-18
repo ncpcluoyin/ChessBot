@@ -57,6 +57,7 @@ def _gpu_inference_loop(req_q, res_qs, model_path, config_dict, max_batch, colle
     model = model.cuda().eval()
     amp_dtype = next(model.parameters()).dtype
     device = 'cuda'
+    value_noise_std = config_dict.get('value_noise_std', 0.0)
 
     collect_sec = collect_ms / 1000.0
     running = True
@@ -99,8 +100,12 @@ def _gpu_inference_loop(req_q, res_qs, model_path, config_dict, max_batch, colle
 
         for i, (rid, wid) in enumerate(zip(ids, wids)):
             if wid < len(res_qs) and res_qs[wid] is not None:
-                # Use blocking put with up to 5s timeout (worker drains res_q between searches)
-                res_qs[wid].put((rid, probs[i], float(vals[i][0])))
+                v = float(vals[i][0])
+                if value_noise_std > 0:
+                    import random as _rnd
+                    v += _rnd.gauss(0, value_noise_std)
+                    v = max(-1.0, min(1.0, v))
+                res_qs[wid].put((rid, probs[i], v))
 
     for q in res_qs:
         if q is not None:
@@ -480,6 +485,7 @@ class BatchGPUEngine(MCTSEngine):
     def __init__(self, model, config: Config):
         self.model = model
         self.config = config
+        self.value_noise_std = getattr(config, 'value_noise_std', 0.0)
         # 推理优化
         torch.set_float32_matmul_precision('high')
         torch.backends.cudnn.allow_tf32 = True
