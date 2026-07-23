@@ -8,6 +8,7 @@ import math
 import random
 import signal
 import time
+import copy
 from collections import deque
 
 import chess
@@ -386,7 +387,10 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
 
 def _save_ema_model(model, trainable_params, ema_params, ema_path):
     """将 EMA 权重写入模型副本并保存。"""
-    import copy
+    # 清理可能挂着的计算图张量
+    for attr in ['_last_value_logits']:
+        if hasattr(model, attr):
+            setattr(model, attr, None)
     model_cpu = copy.deepcopy(model).cpu()
     state = model_cpu.state_dict()
     ema_idx = 0
