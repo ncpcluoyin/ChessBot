@@ -10,7 +10,7 @@ import torch.nn.functional as F
 import chess
 from torch.utils.data import DataLoader, IterableDataset
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.config import Config
 from src.network import load_model
 from src.board import board_to_tensor
@@ -20,14 +20,14 @@ device = 'cuda'
 
 # ─── 配置 ────────────────────────────────────────────
 MODEL_PATH = "data/models/model_sf.pt"
-CHECKPOINT_PATH = "data/models/model_sf_checkpoint.pt"
+CHECKPOINT_PATH = "data/models/model_sf_3class_checkpoint.pt"
 DATA_DIR = "data/hf_supervised_samples"
 
 BATCH_SIZE = 512
 LR = 3e-4
 EPOCHS = 10
 WEIGHT_DECAY = 1e-2           # L2 正则加强
-VALUE_LOSS_WEIGHT = 24.0      # 交叉熵 loss 倍率
+VALUE_LOSS_WEIGHT = 3.0      # CE loss 倍率
 CLASS_THRESHOLD = 0.2          # |eval| ≤ 0.2 → 和棋, 之外用硬标签
 MAX_FILES = 7900
 
@@ -78,47 +78,11 @@ class HFValueDataset(IterableDataset):
                 continue
             yield torch.stack(batch_x), torch.tensor(batch_c, dtype=torch.long)
 
-# ─── 模型修改 ────────────────────────────────────────
-def patch_model_3class(model):
-    """替换 value_fc2 1→3, 打 patch 去掉 tanh"""
-    model.value_fc2 = nn.Linear(256, 3)
-    nn.init.normal_(model.value_fc2.weight, mean=0, std=0.01)
-    nn.init.zeros_(model.value_fc2.bias)
-
-    orig_fwd = model.forward
-    def patched_fwd(self, x, legal_mask=None):
-        x = self.conv_input(x)
-        for blk in self.res_blocks:
-            x = blk(x)
-        # policy (unchanged)
-        p = self.policy_conv(x)
-        p = p.reshape(p.size(0), -1)
-        p = F.gelu(self.policy_fc1(p))
-        logits = self.policy_fc2(p)
-        if legal_mask is not None:
-            logits = logits.masked_fill(~legal_mask, -1e4)
-        p_out = F.log_softmax(logits, dim=-1)
-        # value: 3-class softmax (硬标签: 负/和/胜)
-        v = self.value_conv(x)
-        v = self.value_reduce(v)
-        v = F.gelu(self.value_fc1(v.flatten(1)))
-        v = F.gelu(self.value_fc_hidden(v))
-        v_logits = self.value_fc2(v)  # [B, 3] raw logits
-        v_probs = F.softmax(v_logits, dim=1)  # [p_loss, p_draw, p_win]
-        q = v_probs[:, 2] - v_probs[:, 0]    # win - loss → scalar [-1,1]
-        # 存 logits 给训练用 CE
-        self._last_v_logits = v_logits.detach() if not self.training else v_logits
-        return p_out, q  # policy + scalar q (MCTS 兼容)
-
-    model.forward = patched_fwd.__get__(model, type(model))
-    return model
-
+# ─── 模型冻结 ────────────────────────────────────────
 def freeze_non_value(model):
     """冻结非价值头, BN 骨干→eval, 价值→train"""
     for n, p in model.named_parameters():
         p.requires_grad = n.startswith('value_')
-    n_t = sum(p.numel() for p in model.parameters() if p.requires_grad)
-    print(f"  Trainable: {n_t:,} params (value head only)")
 
     for n, m in model.named_modules():
         if isinstance(m, (nn.BatchNorm2d,)):
@@ -140,12 +104,14 @@ def run():
     print(f"ValueLossWeight={VALUE_LOSS_WEIGHT}  WD={WEIGHT_DECAY}  Thr={CLASS_THRESHOLD} (硬标签)")
 
     config = Config()
+    config.value_head_mode = '3class'
     model = load_model(MODEL_PATH, config).to(device)
     tot = sum(p.numel() for p in model.parameters()) / 1e6
-    print(f"Loaded: {tot:.1f}M params")
+    print(f"Loaded: {tot:.1f}M params (native 3-class)")
 
-    model = patch_model_3class(model)
     freeze_non_value(model)
+    n_t = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    print(f"  Trainable: {n_t:,} params (value head only)")
 
     value_params = [p for p in model.parameters() if p.requires_grad]
     opt = torch.optim.AdamW(value_params, lr=LR, weight_decay=WEIGHT_DECAY)

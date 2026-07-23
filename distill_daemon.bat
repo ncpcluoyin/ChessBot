@@ -1,10 +1,10 @@
 @echo off
-cd /d "%~dp0"
+cd "%~dp0"
 
 set TARGET=%TARGET_EPOCH%
 if "%TARGET%"=="" set TARGET=1800
 set MAX_GAMES=%MAX_GAMES%
-if "%MAX_GAMES%"=="" set MAX_GAMES=5000
+if "%MAX_GAMES%"=="" set MAX_GAMES=2000
 set WORKERS=%DISTILL_WORKERS%
 if "%WORKERS%"=="" set WORKERS=0
 
@@ -17,7 +17,8 @@ echo   Distill Training
 echo =================================
 echo   Data:   %DATA_DIR%
 echo   Model:  %MODEL%
-echo   Batch:      512  LR: 0.002
+echo   Mode:   3-class value head
+echo   Batch:  512  LR: 0.002
 echo =================================
 echo.
 
@@ -27,6 +28,7 @@ echo.
     --model "%MODEL%" ^
     --max-games "%MAX_GAMES%" ^
     --workers "%WORKERS%" ^
+    --mode 3class ^
     --resume
 
 echo.
