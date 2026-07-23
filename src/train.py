@@ -277,6 +277,10 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                 v_class[v_label_raw < -thr] = 0
                 v_logits = model._last_value_logits
                 value_loss = F.cross_entropy(v_logits, v_class)
+                # 最大熵正则: 鼓励价值头不确定性
+                v_probs = F.softmax(v_logits, dim=1)
+                v_entropy = -(v_probs * torch.log(v_probs.clamp(min=1e-8))).sum(dim=1).mean()
+                value_loss = value_loss - config.value_entropy_weight * v_entropy
                 loss = policy_loss + 3.0 * value_loss
 
                 _t2 = time.perf_counter()
