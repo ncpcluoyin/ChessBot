@@ -312,8 +312,8 @@ class ChessBotEngine:
             depth = max(res.max_depth, 1)
             elapsed = max(res.time_elapsed, 0.001)
             nps = int(nodes / elapsed) if nodes > 0 else 0
-            # cp: 始终用 NN 原始值 (搜索 root_q 加权平均低估强着)
-            nn_v = getattr(self, '_nn_raw_v', res.root_value)
+            # cp: 用搜索 root.q (minimax backup 反映最优走法估值)
+            nn_v = res.root_value
             cp = self.config.adj_to_cp(nn_v)
             # Use progress values if fallback was called
             _progress = self.mcts.get_search_progress(self.board)
@@ -394,9 +394,9 @@ class ChessBotEngine:
 
         elapsed = max(progress["elapsed"], 0.001)
         nps = int(nodes / elapsed)
-        # 始终用 NN 原始值 (搜索 root_q 加权平均低估强着)
-        nn_v = getattr(self, '_nn_raw_v', 0.0)
-        cp = self.config.adj_to_cp(nn_v)
+        # 用搜索 root.q (minimax backup)
+        q = max(progress.get("root_q", 0.0), getattr(self, '_nn_raw_v', 0.0))
+        cp = self.config.adj_to_cp(q)
         depth = max(progress["depth"], 1)
         sys.stdout.write(
             f"info depth {depth} "

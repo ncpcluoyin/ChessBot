@@ -334,7 +334,7 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
                     for node in reversed(path_nodes):
                         node.n += 1
                         node.virtual_n = max(0, node.virtual_n - 1)
-                        node.q += (val - node.q) / node.n
+                        node.q = val if node.n == 1 else max(node.q, val)
                         val = -val
                     sims_done += 1
 
@@ -371,7 +371,7 @@ def _mcts_worker_loop(req_q, res_q, cmd_q, progress_q, wid, stop_evt=None):
                 val = leaf_value
                 for node in reversed(path):
                     node.n += 1
-                    node.q += (val - node.q) / node.n
+                    node.q = val if node.n == 1 else max(node.q, val)
                     val = -val
                 sims_done += 1
                 continue
@@ -757,11 +757,12 @@ class BatchGPUEngine(MCTSEngine):
             except Exception:
                 continue
 
-        root_q = q_sum / max(1, q_cnt)
-        # 混入 NN 原始评估, 防止搜索过度偏离
+        # root.q = best child value (minimax)
+        root_q = (max(-c.q for c in root.children if c.n > 0)
+                  if any(c.n > 0 for c in root.children) else 0.0)
+        # 混入 NN 原始评估做保险
         if nn_raw_value is not None:
-            nn_weight = 0.3
-            root_q = nn_weight * nn_raw_value + (1 - nn_weight) * root_q
+            root_q = 0.7 * root_q + 0.3 * nn_raw_value
 
         best_move = None
         try:
