@@ -178,10 +178,12 @@ def _build_meta(data_dir: str):
 
 class SFDistillDataset(IterableDataset):
     def __init__(self, data_dir: str, max_games: int = 0, game_offset: int = 0,
-                 shuffle: bool = True, batch_size: int = 512):
+                 shuffle: bool = True, batch_size: int = 512,
+                 castling_dir: str = None, castling_ratio: float = 0.2):
         self.data_dir = data_dir
         self.shuffle = shuffle
         self._batch_size = batch_size
+        self.castling_ratio = castling_ratio if castling_dir else 0.0
 
         # 从模块级缓存读取元数据 (只加载一次文件)
         meta = _build_meta(data_dir)
@@ -221,6 +223,13 @@ class SFDistillDataset(IterableDataset):
 
         # 重建 game_index 用于 __len__
         self._game_index = [(fi, gi) for fi, gis in self._file_game_map.items() for gi in gis]
+
+        # 加载易位数据
+        self._castling_paths = []
+        if castling_dir and os.path.isdir(castling_dir):
+            self._castling_paths = sorted(glob.glob(os.path.join(castling_dir, "*.pt")))
+            if self._castling_paths:
+                print(f"  Castling data: {len(self._castling_paths)} files, ratio={castling_ratio}")
 
     def __len__(self):
         return sum(self._game_lens[fi][gi] for fi, gi in self._game_index)
@@ -305,3 +314,30 @@ class SFDistillDataset(IterableDataset):
                     target_dist[rows, cols] = torch.tensor(vals, dtype=torch.float32)
                 values = torch.tensor([s[2] for s in sel], dtype=torch.float32)
                 yield inputs, target_dist, values
+
+                # 易位混合: 以 castling_ratio 概率插入一个易位批
+                if self.castling_ratio > 0 and self._castling_paths:
+                    if random.random() < self.castling_ratio:
+                        cf = random.choice(self._castling_paths)
+                        try:
+                            cdata = torch.load(cf, map_location='cpu', weights_only=True)
+                            citems = cdata['data']
+                            csel = random.sample(citems, min(len(citems), batch_size))
+                            cinputs, ctargets, cvalues = [], [], []
+                            for fen, moves_probs, val_raw in csel:
+                                board = chess.Board(fen)
+                                cinputs.append(board_to_tensor(board))
+                                val = -val_raw if board.turn == chess.BLACK else val_raw
+                                cvalues.append(val)
+                                t = torch.zeros(4672, dtype=torch.float32)
+                                for midx, prob in moves_probs:
+                                    if midx is not None and 0 <= midx < 4672:
+                                        t[midx] = prob
+                                ctargets.append(t)
+                            yield (torch.stack(cinputs).float(),
+                                   torch.stack(ctargets),
+                                   torch.tensor(cvalues, dtype=torch.float32))
+                        except Exception as e:
+                            import sys
+                            sys.stderr.write(f"[castling error] {cf}: {e}\n")
+                            sys.stderr.flush()

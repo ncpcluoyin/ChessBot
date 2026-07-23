@@ -28,6 +28,8 @@ echo.
     --model "%MODEL%" ^
     --max-games "%MAX_GAMES%" ^
     --workers "%WORKERS%" ^
+    --castling-dir "data\castling_samples" ^
+    --castling-ratio 0.2 ^
     --resume
 
 echo.
