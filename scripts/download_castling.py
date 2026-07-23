@@ -64,6 +64,12 @@ def download(skip=0):
     
     for row in ds:
         scanned += 1
+        if scanned == 1:
+            # 打印第一条数据的 line 字段
+            print(f"FIRST ROW: fen={row['fen'][:50]}...")
+            print(f"  line (raw) = {repr(row.get('line', ''))}")
+            print(f"  line[:100] = {str(row.get('line', ''))[:100]}")
+            print(f"  first char = {[ord(c) for c in str(row.get('line', ''))[:20]]}")
         if scanned % 500000 == 0:
             el = time.time() - t0
             print(f"  scanned {scanned}  found {found}  | no_line={no_line} not_castling={not_castling} no_eval={no_eval} illegal={illegals}  | {scanned/el:.0f} pos/s")
