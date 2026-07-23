@@ -80,8 +80,20 @@ def download(skip=0):
             no_line += 1
             continue
         parts = uci_line.strip().split()
-        if not parts or parts[0] not in CASTLING_UCIS:
+        if not parts:
             not_castling += 1
+            continue
+        try:
+            mv = chess.Move.from_uci(parts[0])
+            board = chess.Board(fen)
+            if not board.is_castling(mv):
+                not_castling += 1
+                continue
+            if mv not in board.legal_moves:
+                illegals += 1
+                continue
+        except:
+            illegals += 1
             continue
         cp = row.get("cp")
         mate = row.get("mate")
@@ -89,13 +101,8 @@ def download(skip=0):
             no_eval += 1
             continue
         try:
-            board = chess.Board(fen)
-            move = chess.Move.from_uci(parts[0])
-            if move not in board.legal_moves:
-                illegals += 1
-                continue
             from src.board import move_to_index
-            idx = int(move_to_index(move, board))
+            idx = int(move_to_index(mv, board))
         except:
             illegals += 1
             continue
