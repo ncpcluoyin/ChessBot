@@ -18,7 +18,7 @@ echo =================================
 echo   Data:   %DATA_DIR%
 echo   Model:  %MODEL%
 echo   Batch:  512  LR: 0.002
-echo   Value:  3-class CE x 3.0, Policy entropy x 0.5, WD=1e-4
+echo   Value:  3-class CE x 3.0, Policy: entropy x 1.2 + label smooth x 0.1, WD=1e-4
 echo =================================
 echo.
 

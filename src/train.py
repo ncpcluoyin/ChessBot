@@ -268,6 +268,13 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                         smooth_targets.append(out)
                     smooth_targets = torch.from_numpy(np.stack(smooth_targets)).to(config.device)
 
+                # 标签平滑: 混合均匀分布
+                if config.policy_label_smoothing > 0:
+                    eps = config.policy_label_smoothing
+                    n_classes = smooth_targets.shape[-1]
+                    smooth_targets = (1 - eps) * smooth_targets + eps / n_classes
+                smooth_targets = smooth_targets / smooth_targets.sum(dim=-1, keepdim=True)
+
                 policy_loss = -(smooth_targets * policy_log_probs).sum(dim=-1).mean()
 
                 # 策略头熵正则: 鼓励平滑分布
