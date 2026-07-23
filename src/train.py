@@ -281,7 +281,8 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                 else:
                     v_label = (batch_value * config.value_label_scale).clamp(-1, 1)
                     value_loss = ((value_pred - v_label) ** 2).mean()
-                loss = policy_loss + 12.0 * value_loss
+                v_weight = 3.0 if config.value_head_mode == '3class' else 12.0
+                loss = policy_loss + v_weight * value_loss
 
                 _t2 = time.perf_counter()
                 _batch_load_t += _t1 - _t0
