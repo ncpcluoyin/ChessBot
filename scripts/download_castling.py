@@ -46,12 +46,15 @@ def convert_row(row):
     return (fen, [(idx, 1.0)], value)
 
 
-def download():
+def download(skip=80000000):
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
     from datasets import load_dataset
 
     ds = load_dataset("Lichess/chess-position-evaluations", split="train", streaming=True)
+    if skip > 0:
+        print(f"Skipping first {skip} positions...")
+        ds = ds.skip(skip)
     batch, batch_n, found, scanned = [], 0, 0, 0
     t0 = time.time()
 
@@ -91,4 +94,9 @@ def download():
 
 
 if __name__ == '__main__':
-    download()
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument('--skip', type=int, default=80000000,
+                   help='Skip N positions (default 80M = existing data)')
+    args = p.parse_args()
+    download(skip=args.skip)
