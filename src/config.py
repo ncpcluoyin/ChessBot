@@ -53,7 +53,7 @@ class Config:
     learning_rate: float = 0.002
     rl_learning_rate: float = 0.001
     weight_decay: float = 1e-4
-    value_entropy_weight: float = 0.1  # 交叉熵惩罚: 鼓励价值头不确定性
+    policy_entropy_weight: float = 0.5  # 策略头熵惩罚: 鼓励平滑分布
     replay_buffer_size: int = 200_000
     train_epochs: int = 1
     device: str = "cpu"  # __post_init__ 会自动检测为 cuda（若有 GPU）

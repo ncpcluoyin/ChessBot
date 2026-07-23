@@ -269,6 +269,13 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                     smooth_targets = torch.from_numpy(np.stack(smooth_targets)).to(config.device)
 
                 policy_loss = -(smooth_targets * policy_log_probs).sum(dim=-1).mean()
+
+                # 策略头熵正则: 鼓励平滑分布
+                with torch.no_grad():
+                    policy_probs = policy_log_probs.exp()
+                    policy_entropy = -(policy_probs * policy_log_probs).sum(dim=-1).mean()
+                policy_loss = policy_loss - config.policy_entropy_weight * policy_entropy
+
                 # 三分类 CE
                 thr = config.value_class_threshold
                 v_label_raw = (batch_value * config.value_label_scale).clamp(-1, 1)
@@ -277,10 +284,6 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                 v_class[v_label_raw < -thr] = 0
                 v_logits = model._last_value_logits
                 value_loss = F.cross_entropy(v_logits, v_class)
-                # 最大熵正则: 鼓励价值头不确定性
-                v_probs = F.softmax(v_logits, dim=1)
-                v_entropy = -(v_probs * torch.log(v_probs.clamp(min=1e-8))).sum(dim=1).mean()
-                value_loss = value_loss - config.value_entropy_weight * v_entropy
                 loss = policy_loss + 3.0 * value_loss
 
                 _t2 = time.perf_counter()
