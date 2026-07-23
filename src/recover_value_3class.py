@@ -97,13 +97,17 @@ def patch_model_3class(model):
         if legal_mask is not None:
             logits = logits.masked_fill(~legal_mask, -1e4)
         p_out = F.log_softmax(logits, dim=-1)
-        # value (3-class, no tanh)
+        # value: 3-class softmax (STM视角: 负/和/胜)
         v = self.value_conv(x)
         v = self.value_reduce(v)
         v = F.gelu(self.value_fc1(v.flatten(1)))
         v = F.gelu(self.value_fc_hidden(v))
-        v_out = self.value_fc2(v)
-        return p_out, v_out
+        v_logits = self.value_fc2(v)  # [B, 3] raw logits
+        v_probs = F.softmax(v_logits, dim=1)  # [p_loss, p_draw, p_win]
+        q = v_probs[:, 2] - v_probs[:, 0]    # win - loss → scalar [-1,1]
+        # 存 logits 给训练用 CE
+        self._last_v_logits = v_logits.detach() if not self.training else v_logits
+        return p_out, q  # policy + scalar q (MCTS 兼容)
 
     model.forward = patched_fwd.__get__(model, type(model))
     return model
@@ -173,7 +177,8 @@ def run():
             classes = classes.to(device, non_blocking=True)
 
             opt.zero_grad()
-            _, v_logits = model(inputs)
+            _, _ = model(inputs)  # forward, q scalar stored in _last_v_logits
+            v_logits = model._last_v_logits
             ce = F.cross_entropy(v_logits, classes)
             loss = ce * VALUE_LOSS_WEIGHT
             loss.backward()
