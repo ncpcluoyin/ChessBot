@@ -175,9 +175,13 @@ def run():
         gc.collect()
         torch.cuda.empty_cache()
 
-    # 保存 (保存 state_dict, 后续推理需同样 patch)
-    torch.save(model.state_dict(), "data/models/model_sf_3class.pt")
-    print("Done → data/models/model_sf_3class.pt")
+    # 备份旧模型, 保存新模型到标准路径
+    if os.path.exists(MODEL_PATH):
+        import shutil
+        shutil.copy2(MODEL_PATH, MODEL_PATH.replace('.pt', '_old.pt'))
+        print(f"Backup: {MODEL_PATH} → {MODEL_PATH.replace('.pt', '_old.pt')}")
+    torch.save(model.state_dict(), MODEL_PATH)
+    print(f"Done → {MODEL_PATH} (3-class)")
 
 if __name__ == '__main__':
     run()
