@@ -737,73 +737,79 @@ class BatchGPUEngine(MCTSEngine):
                 except queue.Empty:
                     break
 
-        if not merged:
-            import sys as _sys
-            _sys.stderr.write(f"[DBG] sid={sid} no merged results, "
-                              f"pending={pending_workers} "
-                              f"alive={[p.is_alive() for p in self._workers]}\n")
+        try:
+            if not merged:
+                import sys as _sys
+                _sys.stderr.write(f"[DBG] sid={sid} no merged results, "
+                                  f"pending={pending_workers} "
+                                  f"alive={[p.is_alive() for p in self._workers]}\n")
+                _sys.stderr.flush()
+                return self._fallback(board)
+
+            best_uci = max(merged, key=merged.get)
+            total = sum(merged.values()) or 1
+
+            policy = np.zeros(self.config.policy_output_dim, dtype=np.float32)
+            for uci, cnt in merged.items():
+                try:
+                    mv = chess.Move.from_uci(uci)
+                    if mv in board.legal_moves:
+                        policy[move_to_index(mv, board)] = cnt / total
+                except Exception:
+                    continue
+
+            # root.q = best child value (minimax)
+            root_q = (max(-c.q for c in root.children if c.n > 0)
+                      if any(c.n > 0 for c in root.children) else 0.0)
+            # 混入 NN 原始评估做保险
+            if nn_raw_value is not None:
+                nn_weight = 0.3
+                root_q = nn_weight * nn_raw_value + (1 - nn_weight) * root_q
+
+            best_move = None
+            try:
+                best_move = chess.Move.from_uci(best_uci)
+                if best_move not in board.legal_moves:
+                    import sys as _sys
+                    _sys.stderr.write(f"[DBG] bad best_uci={best_uci}, "
+                                      f"merged keys={list(merged.keys())[:10]}\n")
+                    _sys.stderr.flush()
+                    raise ValueError("not legal")
+            except Exception:
+                for m in board.legal_moves:
+                    best_move = m
+                    best_uci = m.uci()
+                    break
+            if best_move is None:
+                for m in board.legal_moves:
+                    best_move = m
+                    best_uci = m.uci()
+                    break
+
+            pv = [best_uci]
+            best_len = 0
+            for wbest, wpv in worker_pvs:
+                if wbest == best_uci and len(wpv) > best_len:
+                    pv = wpv
+                    best_len = len(wpv)
+
+            self._progress_nodes = total_nodes
+            self._progress_depth = len(pv)
+            self._progress_pv = pv
+            self._progress_root_q = root_q
+            self._progress_elapsed = time.time() - self._search_start
+
+            return SearchResult(
+                best_move=best_move, best_move_uci=best_uci,
+                policy=policy, root_value=root_q,
+                nodes_searched=total_nodes, max_depth=len(pv),
+                time_elapsed=self._progress_elapsed, pv=pv)
+        except Exception as e:
+            import sys as _sys, traceback
+            _sys.stderr.write(f"[CRASH] sid={sid}: {e}\n")
+            traceback.print_exc()
             _sys.stderr.flush()
             return self._fallback(board)
-
-        best_uci = max(merged, key=merged.get)
-        total = sum(merged.values()) or 1
-
-        policy = np.zeros(self.config.policy_output_dim, dtype=np.float32)
-        for uci, cnt in merged.items():
-            try:
-                mv = chess.Move.from_uci(uci)
-                if mv in board.legal_moves:
-                    policy[move_to_index(mv, board)] = cnt / total
-            except Exception:
-                continue
-
-        # root.q = best child value (minimax)
-        root_q = (max(-c.q for c in root.children if c.n > 0)
-                  if any(c.n > 0 for c in root.children) else 0.0)
-        # 混入 NN 原始评估做保险
-        if nn_raw_value is not None:
-            nn_weight = 0.3
-            root_q = nn_weight * nn_raw_value + (1 - nn_weight) * root_q
-
-        best_move = None
-        try:
-            best_move = chess.Move.from_uci(best_uci)
-            if best_move not in board.legal_moves:
-                import sys as _sys
-                _sys.stderr.write(f"[DBG] bad best_uci={best_uci}, "
-                                  f"merged keys={list(merged.keys())[:10]}\n")
-                _sys.stderr.flush()
-                raise ValueError("not legal")
-        except Exception:
-            for m in board.legal_moves:
-                best_move = m
-                best_uci = m.uci()
-                break
-        if best_move is None:
-            # 极端兜底: 取第一个合法走法
-            for m in board.legal_moves:
-                best_move = m
-                best_uci = m.uci()
-                break
-
-        pv = [best_uci]
-        best_len = 0
-        for wbest, wpv in worker_pvs:
-            if wbest == best_uci and len(wpv) > best_len:
-                pv = wpv
-                best_len = len(wpv)
-
-        self._progress_nodes = total_nodes
-        self._progress_depth = len(pv)
-        self._progress_pv = pv
-        self._progress_root_q = root_q
-        self._progress_elapsed = time.time() - self._search_start
-
-        return SearchResult(
-            best_move=best_move, best_move_uci=best_uci,
-            policy=policy, root_value=root_q,
-            nodes_searched=total_nodes, max_depth=len(pv),
-            time_elapsed=self._progress_elapsed, pv=pv)
 
     def _fallback(self, board):
         t = board_to_tensor(board).numpy()
@@ -826,21 +832,28 @@ class BatchGPUEngine(MCTSEngine):
             if result is None:
                 # Fallback GPU timeout - use CPU direct inference
                 import torch
-                t_t = torch.from_numpy(t).unsqueeze(0).to(self.config.device)
-                m_t = torch.from_numpy(m).unsqueeze(0).to(self.config.device)
+                # 强制 CPU 避免与 GPU worker 冲突
+                _dev = torch.device('cpu')
+                self.model.to(_dev)
+                t_t = torch.from_numpy(t).unsqueeze(0).to(_dev)
+                m_t = torch.from_numpy(m).unsqueeze(0).to(_dev)
                 with torch.no_grad():
                     logp, val = self.model(t_t, m_t.bool())
                 result = (torch.exp(logp).float().cpu().numpy()[0],
                           float(val.cpu().item()))
+                self.model.to(self.config.device)
         else:
-            # No workers yet, do direct inference
+            # No workers yet, do direct inference on CPU
             import torch
-            t_t = torch.from_numpy(t).unsqueeze(0).cuda()
-            m_t = torch.from_numpy(m).unsqueeze(0).cuda()
+            _dev = torch.device('cpu')
+            self.model.to(_dev)
+            t_t = torch.from_numpy(t).unsqueeze(0).to(_dev)
+            m_t = torch.from_numpy(m).unsqueeze(0).to(_dev)
             with torch.inference_mode():
                 logp, val = self.model(t_t, m_t.bool())
             result = (torch.exp(logp).float().cpu().numpy()[0],
                       float(val.cpu().item()))
+            self.model.to(self.config.device)
 
         probs, value = result
         best_move = None
@@ -861,6 +874,15 @@ class BatchGPUEngine(MCTSEngine):
         self._progress_elapsed = time.time() - self._search_start
         self._progress_nodes = max(getattr(self, '_progress_nodes_saved', 1), 1)
         self._progress_depth = max(getattr(self, '_progress_depth_saved', 0), 1)
+        if best_move is None:
+            # 将杀/无子可动
+            return SearchResult(
+                best_move=None, best_move_uci='0000',
+                policy=np.zeros(self.config.policy_output_dim, dtype=np.float32),
+                root_value=getattr(self, '_progress_root_q_saved', value),
+                nodes_searched=self._progress_nodes,
+                max_depth=self._progress_depth,
+                time_elapsed=self._progress_elapsed, pv=[])
         self._progress_pv = [best_move.uci()]
         self._progress_root_q = getattr(self, '_progress_root_q_saved', value)
 
