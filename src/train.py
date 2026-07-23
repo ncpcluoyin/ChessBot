@@ -61,7 +61,7 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                   model_path: str = None, num_workers: int = 0,
                   resume: bool = False, max_games: int = 0,
                   game_offset: int = 0,
-                  castling_dir: str = None, castling_ratio: float = 0.2):
+                  castling_ratio: float = 0.08):
     if model_path is None:
         model_path = os.path.join(config.model_dir, "model_sf.pt")
 
@@ -112,7 +112,7 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
         ema_params = [p.detach().clone() for p in trainable_params]
 
     total_games = SFDistillDataset(data_dir, max_games=0, game_offset=0,
-                                    castling_dir=castling_dir, castling_ratio=0).total_games
+                                    castling_ratio=0).total_games
     # 启用 TensorFloat-32 (RTX 30xx+ Tensor Core), fp32 精度 2x 加速
     torch.set_float32_matmul_precision('high')
     torch.backends.cudnn.allow_tf32 = True
@@ -194,7 +194,6 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
             dataset = SFDistillDataset(data_dir, max_games=max_games,
                                         game_offset=offset,
                                         batch_size=config.batch_size,
-                                        castling_dir=castling_dir,
                                         castling_ratio=castling_ratio)
             _epoch_ds = time.perf_counter()
             dataloader = None  # 直接迭代 dataset (预组装批)

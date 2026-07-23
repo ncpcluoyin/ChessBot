@@ -179,11 +179,11 @@ def _build_meta(data_dir: str):
 class SFDistillDataset(IterableDataset):
     def __init__(self, data_dir: str, max_games: int = 0, game_offset: int = 0,
                  shuffle: bool = True, batch_size: int = 512,
-                 castling_dir: str = None, castling_ratio: float = 0.08):
+                 castling_ratio: float = 0.08):
         self.data_dir = data_dir
         self.shuffle = shuffle
         self._batch_size = batch_size
-        self.castling_ratio = castling_ratio if castling_dir else 0.0
+        self.castling_ratio = castling_ratio  # 每批中易位样本占比
 
         # 从模块级缓存读取元数据 (只加载一次文件)
         meta = _build_meta(data_dir)
@@ -224,13 +224,6 @@ class SFDistillDataset(IterableDataset):
         # 重建 game_index 用于 __len__
         self._game_index = [(fi, gi) for fi, gis in self._file_game_map.items() for gi in gis]
 
-        # 加载易位数据
-        self._castling_paths = []
-        if castling_dir and os.path.isdir(castling_dir):
-            self._castling_paths = sorted(glob.glob(os.path.join(castling_dir, "*.pt")))
-            if self._castling_paths:
-                print(f"  Castling data: {len(self._castling_paths)} files, ratio={castling_ratio}")
-
     def __len__(self):
         return sum(self._game_lens[fi][gi] for fi, gi in self._game_index)
 
@@ -248,6 +241,7 @@ class SFDistillDataset(IterableDataset):
         batch_size = self._batch_size
         pos_buffer = []
         neg_buffer = []
+        castling_buffer = []  # 易位样本单独缓存
 
         for file_idx in file_idxs:
             batch = torch.load(self._file_paths[file_idx],
@@ -271,16 +265,34 @@ class SFDistillDataset(IterableDataset):
                     converted = _convert_moves(fen, moves_probs)
                     val = -value if fen.split()[1] == 'b' else value
 
+                    # 判断是否易位: 检查旧 63-sq 索引
+                    is_castling = False
+                    if moves_probs and self.castling_ratio > 0:
+                        try:
+                            old_idx = moves_probs[0][0]
+                            move = _old_idx2move(old_idx, board)
+                            is_castling = board.is_castling(move)
+                        except:
+                            pass
+
                     sample = (tensor, converted, val)
-                    if val >= 0:
+                    if is_castling:
+                        castling_buffer.append(sample)
+                    elif val >= 0:
                         pos_buffer.append(sample)
                     else:
                         neg_buffer.append(sample)
 
                     # 缓冲区够大时平衡采样
-                    if len(pos_buffer) >= batch_size and len(neg_buffer) >= batch_size // 2:
-                        half = batch_size // 2
-                        sel = random.sample(pos_buffer, half) + random.sample(neg_buffer, half)
+                    need = batch_size
+                    n_castle = min(len(castling_buffer), int(need * self.castling_ratio))
+                    n_rest = need - n_castle
+                    n_pos = min(len(pos_buffer), n_rest // 2)
+                    n_neg = min(len(neg_buffer), n_rest - n_pos)
+                    if n_castle + n_pos + n_neg >= need:
+                        sel = (random.sample(castling_buffer, n_castle) +
+                               random.sample(pos_buffer, n_pos) +
+                               random.sample(neg_buffer, n_neg))
                         random.shuffle(sel)
                         inputs = torch.stack([s[0] for s in sel]).float()
                         target_dist = torch.zeros(batch_size, 4672, dtype=torch.float32)
@@ -293,12 +305,11 @@ class SFDistillDataset(IterableDataset):
                             target_dist[rows, cols] = torch.tensor(vals, dtype=torch.float32)
                         values = torch.tensor([s[2] for s in sel], dtype=torch.float32)
                         yield inputs, target_dist, values
-                        pos_buffer = []
-                        neg_buffer = []
+                        # 不从 buffer 删除已用的, 允许重复采样(过采样)
 
         # 最后一批
-        if pos_buffer or neg_buffer:
-            all_s = pos_buffer + neg_buffer
+        all_s = pos_buffer + neg_buffer + castling_buffer
+        if all_s:
             random.shuffle(all_s)
             take = min(len(all_s), batch_size)
             sel = all_s[:take]
@@ -314,30 +325,3 @@ class SFDistillDataset(IterableDataset):
                     target_dist[rows, cols] = torch.tensor(vals, dtype=torch.float32)
                 values = torch.tensor([s[2] for s in sel], dtype=torch.float32)
                 yield inputs, target_dist, values
-
-                # 易位混合: 以 castling_ratio 概率插入一个易位批
-                if self.castling_ratio > 0 and self._castling_paths:
-                    if random.random() < self.castling_ratio:
-                        cf = random.choice(self._castling_paths)
-                        try:
-                            cdata = torch.load(cf, map_location='cpu', weights_only=True)
-                            citems = cdata['data']
-                            csel = random.sample(citems, min(len(citems), batch_size))
-                            cinputs, ctargets, cvalues = [], [], []
-                            for fen, moves_probs, val_raw in csel:
-                                board = chess.Board(fen)
-                                cinputs.append(board_to_tensor(board))
-                                val = -val_raw if board.turn == chess.BLACK else val_raw
-                                cvalues.append(val)
-                                t = torch.zeros(4672, dtype=torch.float32)
-                                for midx, prob in moves_probs:
-                                    if midx is not None and 0 <= midx < 4672:
-                                        t[midx] = prob
-                                ctargets.append(t)
-                            yield (torch.stack(cinputs).float(),
-                                   torch.stack(ctargets),
-                                   torch.tensor(cvalues, dtype=torch.float32))
-                        except Exception as e:
-                            import sys
-                            sys.stderr.write(f"[castling error] {cf}: {e}\n")
-                            sys.stderr.flush()
