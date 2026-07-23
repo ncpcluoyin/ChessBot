@@ -28,13 +28,14 @@ LR = 3e-4
 EPOCHS = 10
 WEIGHT_DECAY = 1e-2           # L2 正则加强
 VALUE_LOSS_WEIGHT = 24.0      # 交叉熵 loss 倍率
-CLASS_THRESHOLD = 0.3          # ±0.3 → 胜负/和棋分界
+CLASS_THRESHOLD = 0.2          # |eval| ≤ 0.2 → 和棋, 之外用硬标签
 MAX_FILES = 7900
 
 # ─── 标签转换 ────────────────────────────────────────
 def value_to_3class(values, threshold=CLASS_THRESHOLD):
-    """values: (N,) float in [-1,1] → 0=黑胜, 1=和棋, 2=白胜"""
-    c = torch.full_like(values, 1, dtype=torch.long)
+    """values: (N,) float in [-1,1]
+    0=黑胜(硬), 1=和棋(|eval|≤thr), 2=白胜(硬)"""
+    c = torch.full_like(values, 1, dtype=torch.long)  # 默认和棋
     c[values > threshold] = 2
     c[values < -threshold] = 0
     return c
@@ -97,7 +98,7 @@ def patch_model_3class(model):
         if legal_mask is not None:
             logits = logits.masked_fill(~legal_mask, -1e4)
         p_out = F.log_softmax(logits, dim=-1)
-        # value: 3-class softmax (STM视角: 负/和/胜)
+        # value: 3-class softmax (硬标签: 负/和/胜)
         v = self.value_conv(x)
         v = self.value_reduce(v)
         v = F.gelu(self.value_fc1(v.flatten(1)))
@@ -136,7 +137,7 @@ def ema_update(ema, params, decay=0.999):
 def run():
     print(f"Device: {device}")
     print(f"Batch={BATCH_SIZE}  LR={LR}  Epochs={EPOCHS}")
-    print(f"ValueLossWeight={VALUE_LOSS_WEIGHT}  WD={WEIGHT_DECAY}  Thr={CLASS_THRESHOLD}")
+    print(f"ValueLossWeight={VALUE_LOSS_WEIGHT}  WD={WEIGHT_DECAY}  Thr={CLASS_THRESHOLD} (硬标签)")
 
     config = Config()
     model = load_model(MODEL_PATH, config).to(device)
