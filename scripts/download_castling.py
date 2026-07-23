@@ -56,30 +56,45 @@ def download(skip=80000000):
         print(f"Skipping first {skip} positions...")
         ds = ds.skip(skip)
     
-    # Debug: 检查一条数据格式 (不消耗迭代器)
-    _peek = ds.take(1)
-    for row in _peek:
-        print(f"Row keys: {list(row.keys())}")
-        print(f"line: {row.get('line', '(empty)')[:80]}")
-        print(f"fen: {row.get('fen', '')[:60]}")
-        print(f"cp: {row.get('cp')}, mate: {row.get('mate')}")
-    print("Schema OK, starting main loop...")
-    
     batch, batch_n, found, scanned = [], 0, 0, 0
-    empty_line = 0
-    t0 = time.time()
+    no_line, not_castling, no_eval, illegals = 0, 0, 0, 0
     
     for row in ds:
         scanned += 1
         if scanned % 500000 == 0:
             el = time.time() - t0
-            print(f"  scanned {scanned}, found {found}, line_empty={empty_line}, {scanned/el:.0f} pos/s")
+            print(f"  scanned {scanned}  found {found}  | no_line={no_line} not_castling={not_castling} no_eval={no_eval} illegal={illegals}  | {scanned/el:.0f} pos/s")
 
-        r = convert_row(row)
-        if r is None:
+        fen = row["fen"]
+        uci_line = row.get("line", "")
+        if not fen or not uci_line:
+            no_line += 1
             continue
+        parts = uci_line.strip().split()
+        if not parts or parts[0] not in CASTLING_UCIS:
+            not_castling += 1
+            continue
+        cp = row.get("cp")
+        mate = row.get("mate")
+        if cp is None and mate is None:
+            no_eval += 1
+            continue
+        try:
+            board = chess.Board(fen)
+            move = chess.Move.from_uci(parts[0])
+            if move not in board.legal_moves:
+                illegals += 1
+                continue
+            from src.board import move_to_index
+            idx = int(move_to_index(move, board))
+        except:
+            illegals += 1
+            continue
+        value_stm = cp_to_value(cp) if cp is not None else 0.99
+        value = value_stm if fen.split()[1] == 'w' else -value_stm
+        
         found += 1
-        batch.append(r)
+        batch.append((fen, [(idx, 1.0)], value))
 
         if len(batch) >= BATCH_SIZE:
             batch_n += 1
