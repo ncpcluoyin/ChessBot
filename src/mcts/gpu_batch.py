@@ -779,6 +779,12 @@ class BatchGPUEngine(MCTSEngine):
                 best_move = m
                 best_uci = m.uci()
                 break
+        if best_move is None:
+            # 极端兜底: 取第一个合法走法
+            for m in board.legal_moves:
+                best_move = m
+                best_uci = m.uci()
+                break
 
         pv = [best_uci]
         best_len = 0
