@@ -36,8 +36,6 @@ def main():
     dist_parser.add_argument('--freeze', action='store_true', help='freeze backbone+policy, train value only')
     dist_parser.add_argument('--recover', action='store_true', help='freeze backbone, train new heads only')
     dist_parser.add_argument('--dual-lr', action='store_true', help='value head high LR, backbone low LR')
-    dist_parser.add_argument('--mode', choices=['regression', '3class'], default='regression',
-                            help='value head mode: regress or 3-class CE')
 
     args = parser.parse_args()
     if args.command is None:
@@ -45,8 +43,6 @@ def main():
         return
 
     config = Config()
-    if args.command == 'distill':
-        config.value_head_mode = args.mode
 
     if args.command == "uci":
         _run_uci(config, args.model, intuition=getattr(args, 'intuition', False))

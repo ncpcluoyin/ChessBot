@@ -269,20 +269,15 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                     smooth_targets = torch.from_numpy(np.stack(smooth_targets)).to(config.device)
 
                 policy_loss = -(smooth_targets * policy_log_probs).sum(dim=-1).mean()
-                if config.value_head_mode == '3class':
-                    # 三分类 CE
-                    thr = config.value_class_threshold
-                    v_label_raw = (batch_value * config.value_label_scale).clamp(-1, 1)
-                    v_class = torch.full_like(v_label_raw, 1, dtype=torch.long)
-                    v_class[v_label_raw > thr] = 2
-                    v_class[v_label_raw < -thr] = 0
-                    v_logits = model._last_value_logits
-                    value_loss = F.cross_entropy(v_logits, v_class)
-                else:
-                    v_label = (batch_value * config.value_label_scale).clamp(-1, 1)
-                    value_loss = ((value_pred - v_label) ** 2).mean()
-                v_weight = 3.0
-                loss = policy_loss + v_weight * value_loss
+                # 三分类 CE
+                thr = config.value_class_threshold
+                v_label_raw = (batch_value * config.value_label_scale).clamp(-1, 1)
+                v_class = torch.full_like(v_label_raw, 1, dtype=torch.long)
+                v_class[v_label_raw > thr] = 2
+                v_class[v_label_raw < -thr] = 0
+                v_logits = model._last_value_logits
+                value_loss = F.cross_entropy(v_logits, v_class)
+                loss = policy_loss + 3.0 * value_loss
 
                 _t2 = time.perf_counter()
                 _batch_load_t += _t1 - _t0

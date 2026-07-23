@@ -42,9 +42,6 @@ class Config:
     dirichlet_alpha: float = 0.3
     dirichlet_epsilon: float = 0.25
     virtual_loss: float = 0.5
-
-    # 价值头模式: 'regression' (原 tanh) 或 '3class' (交叉熵)
-    value_head_mode: str = 'regression'
     value_class_threshold: float = 0.2  # 3分类: >thr 硬胜负, ≤thr 和棋
     num_mcts_workers: int = 12  # 默认 12 (平衡速度/内存), 可设 4-24
     temperature_threshold: int = 16

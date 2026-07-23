@@ -17,8 +17,8 @@ echo   Distill Training
 echo =================================
 echo   Data:   %DATA_DIR%
 echo   Model:  %MODEL%
-echo   Mode:   3-class value head
 echo   Batch:  512  LR: 0.002
+echo   Value:  3-class CE x 3.0, WD=1e-2
 echo =================================
 echo.
 
@@ -28,7 +28,6 @@ echo.
     --model "%MODEL%" ^
     --max-games "%MAX_GAMES%" ^
     --workers "%WORKERS%" ^
-    --mode 3class ^
     --resume
 
 echo.

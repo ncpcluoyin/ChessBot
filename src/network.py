@@ -71,8 +71,7 @@ class ChessNet(nn.Module):
         )
         self.value_fc1 = nn.Linear(8 * 8 * 8, 256)
         self.value_fc_hidden = nn.Linear(256, 256)
-        v_out_dim = 3 if config.value_head_mode == '3class' else 1
-        self.value_fc2 = nn.Linear(256, v_out_dim)
+        self.value_fc2 = nn.Linear(256, 3)  # 3-class: 负/和/胜
 
         self._init_weights()
         nn.init.normal_(self.value_fc2.weight, mean=0, std=0.01)
@@ -113,22 +112,18 @@ class ChessNet(nn.Module):
 
         policy_log_probs = F.log_softmax(policy_logits, dim=-1)
 
-        # 价值头
+        # 价值头 (3-class: 负/和/胜)
         v = self.value_conv(x)
         v = self.value_reduce(v)
         v = v.reshape(v.size(0), -1)
         v = F.gelu(self.value_fc1(v))
         v = F.gelu(self.value_fc_hidden(v))
         v_logits = self.value_fc2(v)
-
-        if self.config.value_head_mode == '3class':
-            # 存 logits 给训练用 CE
-            self._last_value_logits = v_logits if self.training else v_logits.detach()
-            # q = p_win - p_loss  (标量, 给 MCTS)
-            v_probs = F.softmax(v_logits, dim=1)
-            value = (v_probs[:, 2] - v_probs[:, 0]).unsqueeze(-1)  # [B,1]
-        else:
-            value = torch.tanh(v_logits)  # [B,1]
+        # 存 logits 给训练 CE
+        self._last_value_logits = v_logits if self.training else v_logits.detach()
+        # q = p_win - p_loss (标量, 给 MCTS)
+        v_probs = F.softmax(v_logits, dim=1)
+        value = (v_probs[:, 2] - v_probs[:, 0]).unsqueeze(-1)  # [B,1]
 
         return policy_log_probs, value
 

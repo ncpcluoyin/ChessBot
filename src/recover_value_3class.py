@@ -104,7 +104,6 @@ def run():
     print(f"ValueLossWeight={VALUE_LOSS_WEIGHT}  WD={WEIGHT_DECAY}  Thr={CLASS_THRESHOLD} (硬标签)")
 
     config = Config()
-    config.value_head_mode = '3class'
     model = load_model(MODEL_PATH, config).to(device)
     tot = sum(p.numel() for p in model.parameters()) / 1e6
     print(f"Loaded: {tot:.1f}M params (native 3-class)")
@@ -175,13 +174,17 @@ def run():
         gc.collect()
         torch.cuda.empty_cache()
 
-    # 备份旧模型, 保存新模型到标准路径
+    # 备份旧模型
     if os.path.exists(MODEL_PATH):
         import shutil
         shutil.copy2(MODEL_PATH, MODEL_PATH.replace('.pt', '_old.pt'))
         print(f"Backup: {MODEL_PATH} → {MODEL_PATH.replace('.pt', '_old.pt')}")
+    # 同时保存两个路径
     torch.save(model.state_dict(), MODEL_PATH)
-    print(f"Done → {MODEL_PATH} (3-class)")
+    _p3 = "data/models/model_sf_3class.pt"
+    torch.save(model.state_dict(), _p3)
+    print(f"Done → {MODEL_PATH}")
+    print(f"Done → {_p3}")
 
 if __name__ == '__main__':
     run()
