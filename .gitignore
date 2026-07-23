@@ -34,3 +34,5 @@ src/smooth_policy.py
 src/smooth_distill.py
 selfplay_loop.bat
 src/selfplay_loop.py
+recover_value.bat
+src/recover_value_3class.py
