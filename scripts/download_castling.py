@@ -55,14 +55,25 @@ def download(skip=80000000):
     if skip > 0:
         print(f"Skipping first {skip} positions...")
         ds = ds.skip(skip)
+    
+    # Debug: 检查一条数据格式 (不消耗迭代器)
+    _peek = ds.take(1)
+    for row in _peek:
+        print(f"Row keys: {list(row.keys())}")
+        print(f"line: {row.get('line', '(empty)')[:80]}")
+        print(f"fen: {row.get('fen', '')[:60]}")
+        print(f"cp: {row.get('cp')}, mate: {row.get('mate')}")
+    print("Schema OK, starting main loop...")
+    
     batch, batch_n, found, scanned = [], 0, 0, 0
+    empty_line = 0
     t0 = time.time()
-
+    
     for row in ds:
         scanned += 1
-        if scanned % 200000 == 0:
+        if scanned % 500000 == 0:
             el = time.time() - t0
-            print(f"  scanned {scanned}, found {found}, {scanned/el:.0f} pos/s")
+            print(f"  scanned {scanned}, found {found}, line_empty={empty_line}, {scanned/el:.0f} pos/s")
 
         r = convert_row(row)
         if r is None:
