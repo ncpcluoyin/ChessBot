@@ -1,8 +1,8 @@
 """
 从 Lichess/chess-position-evaluations 流式下载, 只保存易位走法样本。
-配合原有 8000 万数据集通过 castling_ratio 混合使用。
+索引用 63-sq 编码, 与现有 8000 万数据集兼容。
 """
-import os, sys, gc, time
+import os, sys, gc, time, math
 import numpy as np
 import torch
 import chess
@@ -11,39 +11,53 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "castling_samples")
 BATCH_SIZE = 5000
-TARGET_FILES = 9999  # 跑完整个数据集
-CASTLING_UCIS = {'e1g1', 'e1c1', 'e8g8', 'e8c8'}
+TARGET_FILES = 9999
 
+# ── 63-sq 编码 (兼容旧数据格式, SFDistillDataset._convert_moves 会转成新格式) ──
+_QUEEN_DIRS = [(0,1),(1,1),(1,0),(1,-1),(0,-1),(-1,-1),(-1,0),(-1,1)]
+_KNIGHT_OFFS = [(-1,-2),(-1,2),(-2,-1),(-2,1),(1,-2),(1,2),(2,-1),(2,1)]
+_UNDERPROS = [(-1,chess.KNIGHT),(-1,chess.BISHOP),(-1,chess.ROOK),
+              (0,chess.KNIGHT),(0,chess.BISHOP),(0,chess.ROOK),
+              (1,chess.KNIGHT),(1,chess.BISHOP),(1,chess.ROOK)]
 
+def _63sq_move_to_index(move, board):
+    from_sq = move.from_square; to_sq = move.to_square
+    if board.turn == chess.BLACK:
+        from_sq, to_sq = 63 - from_sq, 63 - to_sq
+    dx = chess.square_file(to_sq) - chess.square_file(from_sq)
+    dy = chess.square_rank(to_sq) - chess.square_rank(from_sq)
+    def _qi():
+        for d,(ddx,ddy) in enumerate(_QUEEN_DIRS):
+            dist = max(abs(dx),abs(dy))
+            if dist==0 or dist>7: continue
+            if ddx*dist==dx and ddy*dist==dy: return d*7+dist-1
+        return None
+    def _ki():
+        for k,(kdx,kdy) in enumerate(_KNIGHT_OFFS):
+            if kdx==dx and kdy==dy: return 56+k
+        return None
+    def _ui():
+        for u,(udx,upromo) in enumerate(_UNDERPROS):
+            if udx==dx and upromo==promo: return 64+u
+        return None
+    for promo in [move.promotion]:
+        if promo == chess.QUEEN:
+            qi = _qi()
+            if qi is not None: return from_sq*73+qi
+        if promo and promo in (chess.KNIGHT,chess.BISHOP,chess.ROOK):
+            ui = _ui()
+            if ui is not None: return from_sq*73+ui
+    qi = _qi()
+    if qi is not None: return from_sq*73+qi
+    ki = _ki()
+    if ki is not None: return from_sq*73+ki
+    raise ValueError(f"cannot encode {move.uci()}")
+
+K = 271.6
 def cp_to_value(cp):
-    return max(-1.0, min(1.0, cp / 1000.0))
-
-
-def convert_row(row):
-    """返回 (fen, [(idx, 1.0)], value) 或 None"""
-    fen = row["fen"]
-    uci_line = row.get("line", "")
-    if not fen or not uci_line:
-        return None
-    parts = uci_line.strip().split()
-    if not parts or parts[0] not in CASTLING_UCIS:
-        return None
-    cp = row.get("cp")
-    mate = row.get("mate")
-    if cp is None and mate is None:
-        return None
-    try:
-        board = chess.Board(fen)
-        move = chess.Move.from_uci(parts[0])
-        if move not in board.legal_moves:
-            return None
-        from src.board import move_to_index
-        idx = int(move_to_index(move, board))
-    except:
-        return None
-    value_stm = cp_to_value(cp) if cp is not None else 0.99
-    value = value_stm if fen.split()[1] == 'w' else -value_stm
-    return (fen, [(idx, 1.0)], value)
+    cp = max(min(cp, 10000), -10000)
+    win_prob = 1.0 / (1.0 + math.exp(-cp / K))
+    return 2.0 * win_prob - 1.0
 
 
 def download(skip=0):
@@ -57,19 +71,13 @@ def download(skip=0):
         ds = ds.skip(skip)
     else:
         print("Starting from beginning...")
-    
+
     batch, batch_n, found, scanned = [], 0, 0, 0
     no_line, not_castling, no_eval, illegals = 0, 0, 0, 0
     t0 = time.time()
-    
+
     for row in ds:
         scanned += 1
-        if scanned == 1:
-            # 打印第一条数据的 line 字段
-            print(f"FIRST ROW: fen={row['fen'][:50]}...")
-            print(f"  line (raw) = {repr(row.get('line', ''))}")
-            print(f"  line[:100] = {str(row.get('line', ''))[:100]}")
-            print(f"  first char = {[ord(c) for c in str(row.get('line', ''))[:20]]}")
         if scanned % 500000 == 0:
             el = time.time() - t0
             print(f"  scanned {scanned}  found {found}  | no_line={no_line} not_castling={not_castling} no_eval={no_eval} illegal={illegals}  | {scanned/el:.0f} pos/s")
@@ -86,11 +94,8 @@ def download(skip=0):
         try:
             mv = chess.Move.from_uci(parts[0])
             board = chess.Board(fen)
-            if not board.is_castling(mv):
+            if not board.is_castling(mv) or mv not in board.legal_moves:
                 not_castling += 1
-                continue
-            if mv not in board.legal_moves:
-                illegals += 1
                 continue
         except:
             illegals += 1
@@ -101,14 +106,13 @@ def download(skip=0):
             no_eval += 1
             continue
         try:
-            from src.board import move_to_index
-            idx = int(move_to_index(mv, board))
+            idx = int(_63sq_move_to_index(mv, board))
         except:
             illegals += 1
             continue
         value_stm = cp_to_value(cp) if cp is not None else 0.99
         value = value_stm if fen.split()[1] == 'w' else -value_stm
-        
+
         found += 1
         batch.append((fen, [(idx, 1.0)], value))
 
@@ -119,7 +123,6 @@ def download(skip=0):
             print(f"  batch {batch_n}: {len(batch)} samples, {found} total")
             batch = []
             gc.collect()
-
         if batch_n >= TARGET_FILES:
             break
 
@@ -138,8 +141,6 @@ def download(skip=0):
 if __name__ == '__main__':
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument('--skip', type=int, default=0,
-                   help='Skip N positions (default 0 = from start)')
+    p.add_argument('--skip', type=int, default=0, help='Skip N positions')
     args = p.parse_args()
-    print(f"Skip: {args.skip}")
     download(skip=args.skip)
