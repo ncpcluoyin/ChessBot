@@ -290,9 +290,13 @@ class SFDistillDataset(IterableDataset):
                     n_pos = min(len(pos_buffer), n_rest // 2)
                     n_neg = min(len(neg_buffer), n_rest - n_pos)
                     if n_castle + n_pos + n_neg >= need:
-                        sel = (random.sample(castling_buffer, n_castle) +
-                               random.sample(pos_buffer, n_pos) +
-                               random.sample(neg_buffer, n_neg))
+                        sel = []
+                        if n_castle > 0:
+                            sel += random.choices(castling_buffer, k=n_castle)
+                        if n_pos > 0:
+                            sel += random.choices(pos_buffer, k=n_pos)
+                        if n_neg > 0:
+                            sel += random.choices(neg_buffer, k=n_neg)
                         random.shuffle(sel)
                         inputs = torch.stack([s[0] for s in sel]).float()
                         target_dist = torch.zeros(batch_size, 4672, dtype=torch.float32)
@@ -305,7 +309,14 @@ class SFDistillDataset(IterableDataset):
                             target_dist[rows, cols] = torch.tensor(vals, dtype=torch.float32)
                         values = torch.tensor([s[2] for s in sel], dtype=torch.float32)
                         yield inputs, target_dist, values
-                        # 不从 buffer 删除已用的, 允许重复采样(过采样)
+                        # 限制 buffer 大小, 防止内存膨胀
+                        max_buf = batch_size * 10
+                        if len(castling_buffer) > max_buf:
+                            castling_buffer = random.sample(castling_buffer, max_buf)
+                        if len(pos_buffer) > max_buf:
+                            pos_buffer = random.sample(pos_buffer, max_buf)
+                        if len(neg_buffer) > max_buf:
+                            neg_buffer = random.sample(neg_buffer, max_buf)
 
         # 最后一批
         all_s = pos_buffer + neg_buffer + castling_buffer
