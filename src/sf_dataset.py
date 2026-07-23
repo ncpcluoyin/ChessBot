@@ -179,7 +179,7 @@ def _build_meta(data_dir: str):
 class SFDistillDataset(IterableDataset):
     def __init__(self, data_dir: str, max_games: int = 0, game_offset: int = 0,
                  shuffle: bool = True, batch_size: int = 512,
-                 castling_dir: str = None, castling_ratio: float = 0.2):
+                 castling_dir: str = None, castling_ratio: float = 0.08):
         self.data_dir = data_dir
         self.shuffle = shuffle
         self._batch_size = batch_size

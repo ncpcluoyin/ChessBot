@@ -39,7 +39,7 @@ def main():
     dist_parser.add_argument('--castling-dir', default=None,
                             help='易位样本目录 (data/castling_samples)')
     dist_parser.add_argument('--castling-ratio', type=float, default=0.2,
-                            help='每批中易位样本比例 (默认 0.2)')
+                            help='每批中易位样本比例 (默认 0.08)')
 
     args = parser.parse_args()
     if args.command is None:
