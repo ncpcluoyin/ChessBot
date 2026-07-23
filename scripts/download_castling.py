@@ -12,8 +12,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 OUTPUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "castling_samples")
 BATCH_SIZE = 5000
 OVER_SAMPLE = 20
-TARGET_CASTLING = 50000  # 目标易位样本数 (扩增前)
-MAX_SCAN = 5_000_000
+TARGET_CASTLING = 80000  # 目标易位样本数 (扩增前, 约扫4000万局面)
+MAX_SCAN = 40_000_000
 
 CASTLING_UCIS = {'e1g1', 'e1c1', 'e8g8', 'e8c8'}
 
