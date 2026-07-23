@@ -58,6 +58,7 @@ def download(skip=80000000):
     
     batch, batch_n, found, scanned = [], 0, 0, 0
     no_line, not_castling, no_eval, illegals = 0, 0, 0, 0
+    t0 = time.time()
     
     for row in ds:
         scanned += 1
