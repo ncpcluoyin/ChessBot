@@ -265,15 +265,19 @@ class SFDistillDataset(IterableDataset):
                     converted = _convert_moves(fen, moves_probs)
                     val = -value if fen.split()[1] == 'b' else value
 
-                    # 判断是否易位: 检查旧 63-sq 索引
+                    # 判断是否易位: 快速预检 + 精确判断
                     is_castling = False
                     if moves_probs and self.castling_ratio > 0:
-                        try:
-                            old_idx = moves_probs[0][0]
-                            move = _old_idx2move(old_idx, board)
-                            is_castling = board.is_castling(move)
-                        except:
-                            pass
+                        old_idx = moves_probs[0][0]
+                        sq = old_idx // 73
+                        mt = old_idx % 73
+                        # 63-sq 中易位只有 mt=15(右2) 或 mt=43(左2), 来自 e1(4) 或 e8(翻转→3)
+                        if (mt == 15 or mt == 43) and sq in (3, 4):
+                            try:
+                                move = _old_idx2move(old_idx, board)
+                                is_castling = board.is_castling(move)
+                            except:
+                                pass
 
                     sample = (tensor, converted, val)
                     if is_castling:
@@ -287,16 +291,13 @@ class SFDistillDataset(IterableDataset):
                     need = batch_size
                     n_castle = min(len(castling_buffer), int(need * self.castling_ratio))
                     n_rest = need - n_castle
-                    n_pos = min(len(pos_buffer), n_rest // 2)
-                    n_neg = min(len(neg_buffer), n_rest - n_pos)
-                    if n_castle + n_pos + n_neg >= need:
+                    half = n_rest // 2
+                    if len(pos_buffer) >= half and len(neg_buffer) >= half:
                         sel = []
                         if n_castle > 0:
                             sel += random.choices(castling_buffer, k=n_castle)
-                        if n_pos > 0:
-                            sel += random.choices(pos_buffer, k=n_pos)
-                        if n_neg > 0:
-                            sel += random.choices(neg_buffer, k=n_neg)
+                        sel += random.choices(pos_buffer, k=half)
+                        sel += random.choices(neg_buffer, k=half)
                         random.shuffle(sel)
                         inputs = torch.stack([s[0] for s in sel]).float()
                         target_dist = torch.zeros(batch_size, 4672, dtype=torch.float32)
@@ -309,14 +310,12 @@ class SFDistillDataset(IterableDataset):
                             target_dist[rows, cols] = torch.tensor(vals, dtype=torch.float32)
                         values = torch.tensor([s[2] for s in sel], dtype=torch.float32)
                         yield inputs, target_dist, values
-                        # 限制 buffer 大小, 防止内存膨胀
+                        # 清除 pos/neg 保证下一批采样新数据; castling 保留用于过采样
+                        pos_buffer = []
+                        neg_buffer = []
                         max_buf = batch_size * 10
                         if len(castling_buffer) > max_buf:
                             castling_buffer = random.sample(castling_buffer, max_buf)
-                        if len(pos_buffer) > max_buf:
-                            pos_buffer = random.sample(pos_buffer, max_buf)
-                        if len(neg_buffer) > max_buf:
-                            neg_buffer = random.sample(neg_buffer, max_buf)
 
         # 最后一批
         all_s = pos_buffer + neg_buffer + castling_buffer
