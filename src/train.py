@@ -61,7 +61,7 @@ def train_distill(config: Config, data_dir: str, epochs: int = 100,
                   model_path: str = None, num_workers: int = 0,
                   resume: bool = False, max_games: int = 0,
                   game_offset: int = 0,
-                  castling_ratio: float = 0.08):
+                  castling_ratio: float = 0.2):
     if model_path is None:
         model_path = os.path.join(config.model_dir, "model_sf.pt")
 

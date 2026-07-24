@@ -36,8 +36,8 @@ def main():
     dist_parser.add_argument('--freeze', action='store_true', help='freeze backbone+policy, train value only')
     dist_parser.add_argument('--recover', action='store_true', help='freeze backbone, train new heads only')
     dist_parser.add_argument('--dual-lr', action='store_true', help='value head high LR, backbone low LR')
-    dist_parser.add_argument('--castling-ratio', type=float, default=0.08,
-                            help='每批中易位样本过采样比例 (默认 0.08)')
+    dist_parser.add_argument('--castling-ratio', type=float, default=0.2,
+                            help='每批中易位样本过采样比例 (默认 0.2)')
 
     args = parser.parse_args()
     if args.command is None:
