@@ -291,13 +291,15 @@ class SFDistillDataset(IterableDataset):
                     need = batch_size
                     n_castle = min(len(castling_buffer), int(need * self.castling_ratio))
                     n_rest = need - n_castle
-                    half = n_rest // 2
-                    if len(pos_buffer) >= half and len(neg_buffer) >= half:
+                    half = (need - n_castle) // 2
+                    n_pos = half
+                    n_neg = need - n_castle - half
+                    if len(pos_buffer) >= n_pos and len(neg_buffer) >= n_neg:
                         sel = []
                         if n_castle > 0:
                             sel += random.choices(castling_buffer, k=n_castle)
-                        sel += random.choices(pos_buffer, k=half)
-                        sel += random.choices(neg_buffer, k=half)
+                        sel += random.choices(pos_buffer, k=n_pos)
+                        sel += random.choices(neg_buffer, k=n_neg)
                         random.shuffle(sel)
                         inputs = torch.stack([s[0] for s in sel]).float()
                         target_dist = torch.zeros(batch_size, 4672, dtype=torch.float32)
